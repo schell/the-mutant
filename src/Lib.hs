@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# OPTIONS_GHC -fconstraint-solver-iterations=0 #-}
+{-# OPTIONS_GHC -fplugin=Polysemy.Plugin         #-}
 module Lib
     ( someFunc
     ) where
@@ -19,9 +20,9 @@ module Lib
 import           Control.Lens                     ((^.))
 import           Control.Monad                    (void)
 import           Data.Kind                        (Type)
-import           Language.Javascript.JSaddle      (Function, JSM, JSVal, JSContextRef,
-                                                   function, js, js1, js2, jsg,
-                                                   jss, runJSM, askJSM)
+import           Language.Javascript.JSaddle      (Function, JSContextRef, JSM,
+                                                   JSVal, askJSM, function, js,
+                                                   js1, js2, jsg, jss, runJSM)
 import           Language.Javascript.JSaddle.Warp (run)
 import           Polysemy                         hiding (run)
 import           Polysemy.IO                      (runIO)
@@ -137,10 +138,12 @@ myApp = do
     $ putStrLn "clicked!"
 
 
-myWebApp :: Semantic [UI Web, Lift JSM, Lift IO] ()
+myWebApp :: Semantic [UI Web, Lift JSM] ()
 myWebApp = myApp
 
 someFunc :: IO ()
 someFunc = do
   putStrLn "starting the app at http://localhost:8888"
-  (runM . (runJSMEff .@ runUI)) myWebApp
+  runM
+    $ runJSMEff
+    $ runUI (runM . runJSMEff) myWebApp
