@@ -5,11 +5,13 @@
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
+{-# OPTIONS_GHC -fconstraint-solver-iterations=0 #-}
 module Lib
     ( someFunc
     ) where
@@ -17,9 +19,9 @@ module Lib
 import           Control.Lens                     ((^.))
 import           Control.Monad                    (void)
 import           Data.Kind                        (Type)
-import           Language.Javascript.JSaddle      (Function, JSM, JSVal,
+import           Language.Javascript.JSaddle      (Function, JSM, JSVal, JSContextRef,
                                                    function, js, js1, js2, jsg,
-                                                   jss)
+                                                   jss, runJSM, askJSM)
 import           Language.Javascript.JSaddle.Warp (run)
 import           Polysemy                         hiding (run)
 import           Polysemy.IO                      (runIO)
@@ -82,28 +84,43 @@ instance HasUI Web where
 runUI
   :: forall r a
    . Member (Lift JSM) r
-  => Sem (UI Web ': r) a
+  => (forall x. Sem r x -> JSM x)
+  -> Sem (UI Web ': r) a
   -> Sem r a
-runUI = interpretH $ \case
-  GetStage -> sendM $ do
-    node <- Node @Web <$> jsg "document"
-    return node
-  AddListener node EventClick m -> sendM $ do
-    f   <- function $ \_ _ _ -> m
-    void $ (unNode node) ^. js2 "addEventListener" "click" f
-    return Listener{ listenerEvent = EventClick
-                   , listenerNode  = node
-                   , listenerCall  = f
-                   }
+runUI finish = interpretH $ \case
+  GetStage ->
+    sendM (Node @Web <$> jsg "document")
+      >>= pureT
+  AddListener node EventClick m -> do
+    m1  <- runT m
+    ref <- sendM askJSM
+
+    let runIt
+          :: Member (Lift JSM) r
+          => Sem (UI Web ': r) x
+          -> JSM x
+        runIt = finish .@ runUI
+
+    cb <- sendM
+      $ function
+      $ \_ _ _ -> void $ runIt m1
+
+    sendM (void $ (unNode node) ^. js2 "addEventListener" "click" cb)
+
+    pureT Listener{ listenerEvent = EventClick
+                  , listenerNode  = node
+                  , listenerCall  = cb
+                  }
 
 
-runJSM
+runJSMEff
   :: Member (Lift IO) r
   => Sem (Lift JSM ': r) a
   -> Sem r a
-runJSM = interpret $ \(Lift jsm) -> sendM $ do
-  run 8888 $ jsm >> return undefined
-  return undefined
+runJSMEff = undefined
+  --interpret $ \(Lift jsm) -> sendM $ do
+  --  run 8888 $ jsm >> return undefined
+  --  return undefined
 
 
 myApp
@@ -114,16 +131,16 @@ myApp
   => Sem r ()
 myApp = do
   stage <- getStage @ctx
-  addListener stage EventClick
+  void
+    $ addListener stage EventClick
     $ sendM
     $ putStrLn "clicked!"
 
 
+myWebApp :: Semantic [UI Web, Lift JSM, Lift IO] ()
+myWebApp = myApp
 
 someFunc :: IO ()
 someFunc = do
   putStrLn "starting the app at http://localhost:8888"
-  runM
-    $ runJSM
-    $ runUI
-    $ myApp @Web
+  (runM . (runJSMEff .@ runUI)) myWebApp

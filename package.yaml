@@ -42,6 +42,7 @@ executables:
     - -O2
     - -flate-specialise
     - -fspecialise-aggressively
+    - -fconstraint-solver-iterations=0
     dependencies:
     - free-gui
 
