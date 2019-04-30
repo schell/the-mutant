@@ -21,14 +21,19 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
+- jsaddle
+- jsaddle-warp
 - lens
 - polysemy
 - polysemy-plugin
-- jsaddle
-- jsaddle-warp
+- text
 
 library:
   source-dirs: src
+  ghc-options:
+  - -fplugin=Polysemy.Plugin
+  - -fconstraint-solver-iterations=0
+  - -Wall
 
 executables:
   free-gui-exe:
@@ -38,11 +43,9 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -fplugin=Polysemy.Plugin
     - -O2
     - -flate-specialise
     - -fspecialise-aggressively
-    - -fconstraint-solver-iterations=0
     dependencies:
     - free-gui
 
