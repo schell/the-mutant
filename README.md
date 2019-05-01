@@ -7,3 +7,8 @@ The point of it all is to be able to quickly write portable games in Haskell.
 
 `the-mutant` gets its name from its unapologetic use of in-place mutation, which
 many Haskell devs fear. Don't fear The Mutant.
+
+
+[gelatin]: https://github.com/schell/gelatin
+[glucose]: https://github.com/schell/glucose
+[odin]: https://github.com/schell/odin

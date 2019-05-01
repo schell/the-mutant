@@ -16,7 +16,7 @@
 {-# LANGUAGE TypeOperators         #-}
 {-# OPTIONS_GHC -fconstraint-solver-iterations=0 #-}
 {-# OPTIONS_GHC -fplugin=Polysemy.Plugin         #-}
-module Lib where
+module Mutant.Interpreters.JSaddle.UI where
 
 import           Control.Arrow                    ((&&&))
 import           Control.Exception                (Exception, throwIO)

@@ -19,6 +19,7 @@ dependencies:
 - jsaddle
 - jsaddle-warp
 - lens
+- linear
 - polysemy
 - polysemy-plugin
 - text
@@ -32,9 +33,9 @@ library:
   - -Wall
 
 executables:
-  free-gui-exe:
+  ui-exe:
     main:                Main.hs
-    source-dirs:         app
+    source-dirs:         app/UI
     ghc-options:
     - -threaded
     - -rtsopts
@@ -44,6 +45,20 @@ executables:
     - -fspecialise-aggressively
     dependencies:
     - the-mutant
+
+  render2d-exe:
+    main:                Main.hs
+    source-dirs:         app/Renders2d
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -O2
+    - -flate-specialise
+    - -fspecialise-aggressively
+    dependencies:
+    - the-mutant
+
 
 tests:
   free-gui-test:
