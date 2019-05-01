@@ -1,12 +1,15 @@
 {-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveFunctor         #-}
+{-# LANGUAGE DerivingStrategies    #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE StandaloneDeriving    #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
@@ -15,147 +18,146 @@
 {-# OPTIONS_GHC -fplugin=Polysemy.Plugin         #-}
 module Lib where
 
+import           Control.Arrow                    ((&&&))
+import           Control.Exception                (Exception, throwIO)
 import           Control.Lens                     ((^.))
 import           Control.Monad                    (void)
 import           Control.Monad.IO.Class           (MonadIO (..))
-import           Data.Kind                        (Type)
-import           Data.Text                        (Text)
+import           Data.IntMap.Strict               (IntMap)
+import qualified Data.IntMap.Strict               as IM
 import qualified Data.Text                        as T
 import           GHC.Conc                         (TVar, atomically, newTVar,
                                                    readTVar, writeTVar)
-import           Language.Javascript.JSaddle      (Function, JSM, JSVal,
-                                                   function, js, js1, js2, jsg,
-                                                   jss)
+import           Language.Javascript.JSaddle      (JSM, JSVal, function, js,
+                                                   js1, js2, jsg, jss)
 import           Language.Javascript.JSaddle.Warp (run)
 import           Polysemy                         hiding (run)
+import           Polysemy.Error                   (Error, runError, throw)
 import           Polysemy.IO                      (runIO)
+import           Polysemy.State                   (State (..), gets, modify)
+
+import           Mutant.Eff.Mutates
+import           Mutant.Eff.UI
 
 
-
-class HasUI ctx where
-  -- | The type of a UI node that can be added to a display graph.
-  type NodeType ctx
-  -- | An external(ish) callback.
-  type Callback ctx
-
-
-newtype Node ctx
-  = Node { nodeValue :: NodeType ctx }
-
-
-data Event
-  = EventClick
-
-
-data Listener ctx
-  = Listener
-  { listenerEvent :: Event
-  , listenerNode  :: Node ctx
-  , listenerCall  :: Callback ctx
+data BrowserData
+  = BrowserData
+  { browserDataNextK     :: Int
+  , browserDataStage     :: Maybe Stage
+  , browserDataNodes     :: IntMap JSVal
+  , browserDataListeners :: IntMap JSVal
   }
 
 
-newtype Stage ctx
-  = Stage
-  { stageNode :: Node ctx }
+initialBrowserData :: BrowserData
+initialBrowserData =
+  BrowserData
+  { browserDataNextK     = 0
+  , browserDataStage     = Nothing
+  , browserDataNodes     = mempty
+  , browserDataListeners = mempty
+  }
 
 
-newtype Label ctx
-  = Label
-  { labelNode :: Node ctx }
+data BrowserError
+  = BrowserErrorDoesNotExist String
+  deriving anyclass Exception
+deriving instance Show BrowserError -- WTF GHC
 
 
-data UI ctx m a where
-  -- | Get a referenc to the root/stage node.
-  GetStage :: UI ctx m (Stage ctx)
-
-  -- | Create a text label.
-  NewLabel :: Text -> UI ctx m (Label ctx)
-
-  -- | Change the text on a label.
-  UpdateLabel :: Label ctx -> Text -> UI ctx m ()
-
-  -- | Append a child node to another node.
-  AppendChild :: Node ctx -> Node ctx -> UI ctx m ()
-
-  -- | Add some listener for an event to the node.
-  AddListener :: Node ctx -> Event -> m () -> UI ctx m (Listener ctx)
-
-makeSem_ ''UI
+freshK
+  :: Member (State BrowserData) r
+  => Sem r Int
+freshK = do
+  modify (\d -> d{ browserDataNextK = succ $ browserDataNextK d})
+  gets browserDataNextK
 
 
-getStage
-  :: Member (UI ctx) r
-  => Sem r (Stage ctx)
+getNode
+  :: ( Member (State BrowserData) r
+     , Member (Error BrowserError) r
+     )
+  => Node
+  -> Sem r JSVal
+getNode node =
+  gets (IM.lookup (nodeId node) . browserDataNodes)
+    >>= maybe (throw $ BrowserErrorDoesNotExist $ show node) return
 
 
-newLabel
-  :: Member (UI ctx) r
-  => Text
-  -> Sem r (Label ctx)
+getListener
+  :: ( Member (State BrowserData) r
+     , Member (Error BrowserError) r
+     )
+  => Listener
+  -> Sem r (JSVal, JSVal)
+getListener l = do
+  n <- getNode $ Node $ listenerNodeId l
+  f <- gets (IM.lookup (listenerId l) . browserDataListeners)
+    >>= maybe (throw $ BrowserErrorDoesNotExist $ show l) return
+  return (n, f)
 
 
-updateLabel
-  :: Member (UI ctx) r
-  => Label ctx
-  -> Text
-  -> Sem r ()
+eventToString
+  :: Event
+  -> String
+eventToString = \case
+  EventClick -> "click"
 
-
-addListener
-  :: Member (UI ctx) r
-  => Node ctx
-  -> Event
-  -> Sem r ()
-  -> Sem r (Listener ctx)
-
-
-appendChild
-  :: Member (UI ctx) r
-  => Node ctx
-  -> Node ctx
-  -> Sem r ()
-
-
-data Web
-
--- | JSM implementation
-instance HasUI Web where
-  type NodeType Web = JSVal
-  type Callback Web = Function
 
 
 runUI
   :: forall r a
    . Member (Lift JSM) r
+  => Member (State BrowserData) r
+  => Member (Error BrowserError) r
   => (forall x. Sem r x -> JSM x)
-  -> Sem (UI Web ': r) a
+  -> Sem (UI ': r) a
   -> Sem r a
 runUI finish = interpretH $ \case
   GetStage -> do
-    body <- sendM $ do
-      doc <- jsg "document"
-      doc ^. js "body"
-    pureT
-      $ Stage
-      $ Node body
+    stage <-
+      gets browserDataStage >>= \case
+        Nothing -> do
+          body <- sendM $ do
+            doc <- jsg "document"
+            doc ^. js "body"
+          k <- freshK
+          let stage = Stage $ Node k
+          modify $ \dat ->
+            dat{ browserDataNodes = IM.insert k body $ browserDataNodes dat
+               , browserDataStage = Just stage
+               }
+          return stage
+        Just stage -> return stage
+    pureT stage
+
   NewLabel txt -> do
-    node <- sendM $ jsg "document" ^. js1 "createTextNode" txt
+    jsnode <- sendM $ jsg "document" ^. js1 "createTextNode" txt
+    k      <- freshK
+    modify $ \dat ->
+      dat{ browserDataNodes = IM.insert k jsnode $ browserDataNodes dat}
     pureT
       $ Label
-      $ Node node
+      $ Node k
+
   UpdateLabel lbl txt -> do
-    void $ sendM $ (nodeValue $ labelNode lbl) ^. jss "textContent" txt
+    jsnode <- getNode (labelNode lbl)
+    void $ sendM $ jsnode ^. jss "textContent" txt
     pureT ()
-  AppendChild (Node parent) (Node child) -> do
-    sendM $ void $ parent ^. js1 "appendChild" child
+
+  AppendChild parent child -> do
+    pv <- getNode parent
+    cv <- getNode child
+    sendM $ void $ pv ^. js1 "appendChild" cv
     pureT ()
-  AddListener node EventClick m -> do
+
+  AddListener node ev m -> do
+    val <- getNode node
     m1  <- runT m
 
     let runIt
           :: Member (Lift JSM) r
-          => Sem (UI Web ': r) x
+          => Sem (UI ': r) x
           -> JSM x
         runIt = finish .@ runUI
 
@@ -163,35 +165,44 @@ runUI finish = interpretH $ \case
       $ function
       $ \_ _ _ -> void $ runIt m1
 
-    sendM (void $ (nodeValue node) ^. js2 "addEventListener" "click" cb)
+    jslistener <- sendM (val ^. js2 "addEventListener" (eventToString ev) cb)
 
-    pureT Listener{ listenerEvent = EventClick
-                  , listenerNode  = node
-                  , listenerCall  = cb
+    (k, ls) <- gets (browserDataNextK &&& browserDataListeners)
+
+    modify
+      $ \dat ->
+        dat{ browserDataNextK = succ k
+           , browserDataListeners = IM.insert k jslistener ls
+           }
+
+    pureT Listener{ listenerId     = k
+                  , listenerNodeId = nodeId node
+                  , listenerEvent  = ev
                   }
-
+  RemoveListener listener -> do
+    (n, l) <- getListener listener
+    let ev = eventToString $ listenerEvent listener
+    sendM (void $ n ^. js2 "removeEventListener" ev l)
+    pureT ()
 
 
 
 myApp
-  :: ( Member (UI ctx) r
+  :: ( Member UI r
      , Member (Lift IO ) r
+     , Member Mutates r
      )
   => Sem r ()
 myApp = do
   stage <- getStage
-  label <- newLabel $ T.pack "Count: ?"
-  var   <- liftIO $ atomically $ newTVar (0 :: Int)
+  label <- newLabel $ T.pack "Count: 0"
+  var   <- newSlot @Int 0
   appendChild (stageNode stage) (labelNode label)
 
   void
     $ addListener (stageNode stage) EventClick
     $ do
-      clicks <- liftIO $ atomically $ do
-        n <- readTVar var
-        let n1 = succ n
-        writeTVar var n1
-        return n1
+      clicks <- withSlot var succ
       updateLabel label
         $ T.pack
         $ unwords
@@ -203,10 +214,46 @@ myApp = do
     $ putStrLn "ready..."
 
 
+runStateInTVar
+  :: forall r x a
+   . Member (Lift IO) r
+  => TVar x
+  -> Sem (State x ': r) a
+  -> Sem r a
+runStateInTVar var = interpretH $ \case
+  Get ->
+    sendM (liftIO $ atomically $ readTVar var)
+      >>= pureT
+  Put x ->
+    sendM (liftIO $ atomically $ writeTVar var x)
+      >> pureT ()
+
+
 someFunc :: IO ()
 someFunc = do
   putStrLn "starting the app at http://localhost:8888"
+  var <- atomically $ newTVar initialBrowserData
   run 8888
+    $ void
     $ runM
     $ runIO @JSM
-    $ runUI (runM . runIO @JSM) myApp
+    $ runError
+    $ runSlot
+    $ runStateInTVar var
+    $ runUI
+        ( handleEnd
+        . runM
+        . runIO @JSM
+        . runError
+        . runSlot
+        . runStateInTVar var
+        )
+        myApp
+  where
+    handleEnd
+      :: JSM (Either BrowserError x) -> JSM x
+    handleEnd f =
+      f >>=
+        either
+          (liftIO . throwIO)
+          return
