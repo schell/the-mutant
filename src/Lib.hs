@@ -179,6 +179,7 @@ runUI finish = interpretH $ \case
                   , listenerNodeId = nodeId node
                   , listenerEvent  = ev
                   }
+
   RemoveListener listener -> do
     (n, l) <- getListener listener
     let ev = eventToString $ listenerEvent listener
