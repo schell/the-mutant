@@ -19,13 +19,10 @@ module Mutant.Interpreters.JSaddle.Renders2d where
 
 import           Control.Lens                     ((^.))
 import           Control.Monad                    (void)
-import           Control.Monad.IO.Class           (MonadIO (..))
-import           Data.Foldable                    (for_)
-import           Data.Function                    (fix)
-import           GHC.Conc                         (threadDelay)
 import           Language.Javascript.JSaddle      (JSM, JSVal,
                                                    fromJSValUnchecked, js, js0,
-                                                   js1, js2, js4, jsg)
+                                                   js1, js2, js4, jsf, jsg, jss,
+                                                   toJSVal)
 import           Language.Javascript.JSaddle.Warp (run)
 import           Linear                           (V2 (..))
 import           Polysemy                         hiding (run)
@@ -34,25 +31,30 @@ import           Polysemy.IO                      (runIO)
 import           Mutant.Eff.Renders2d
 
 
-data Canvas
-  = Canvas
-  { canvasVal :: JSVal
-  , canvasCtx :: JSVal
-  }
+type JSCanvas = Canvas JSVal JSVal
 
 
-getNewCanvas :: JSM Canvas
-getNewCanvas = do
-  doc <- jsg "document"
-  cvs <- doc ^. js1 "createElement" "canvas"
-  ctx <- cvs ^. js1 "getContext" "2d"
-  return $ Canvas cvs ctx
+type JSRenders2d = Renders2d 'Renders2dJSaddle
 
 
-getDims :: Canvas -> JSM (V2 Int)
+data instance Texture 'Renders2dJSaddle = JSTexture JSVal
+
+
+getNewJSCanvas :: JSM JSCanvas
+getNewJSCanvas = do
+  doc  <- jsg "document"
+  cvs  <- doc ^. js1 "createElement" "canvas"
+  ctx  <- cvs ^. js1 "getContext" "2d"
+  return Canvas
+         { canvasWindow = cvs
+         , canvasCtx = ctx
+         }
+
+
+getDims :: JSCanvas -> JSM (V2 Int)
 getDims canvas = do
-  w <- canvasVal canvas ^. js "width"
-  h <- canvasVal canvas ^. js "height"
+  w <- canvasWindow canvas ^. js "width"
+  h <- canvasWindow canvas ^. js "height"
   V2
     <$> fromJSValUnchecked w
     <*> fromJSValUnchecked h
@@ -60,8 +62,8 @@ getDims canvas = do
 
 runRenders2dInJSaddle
   :: Member (Lift JSM) r
-  => Canvas
-  -> Sem (Renders2d ': r) a
+  => JSCanvas
+  -> Sem (JSRenders2d ': r) a
   -> Sem r a
 runRenders2dInJSaddle canvas@(Canvas _ ctx) = interpret $ \case
   Clear -> sendM $ do
@@ -76,40 +78,32 @@ runRenders2dInJSaddle canvas@(Canvas _ ctx) = interpret $ \case
     void $ ctx ^. js0 "stroke"
   DrawRect (Rect (V2 x y) (V2 w h)) -> sendM $
     void $ ctx ^. js4 "fillRect" x y w h
-
-
-drawingStuff
-  :: ( Member Renders2d r
-     , Member (Lift IO) r
-     )
-  => Sem r ()
-drawingStuff = do
-  V2 w h <- getDimensions
-  let tl = 10
-      tr = V2 (w - 10) 10
-      br = V2 (w - 10) (h - 10)
-      bl = V2 10 (h - 10)
-      points = [tl, tr, br, bl]
-      lnes = zip points $ drop 1 points ++ [tl]
-  fix $ \loop -> do
-    for_ lnes $ \line -> do
-      clear
-      uncurry drawLine line
-      liftIO $ threadDelay 500000
-    clear
-    drawRect $ Rect tl (br - tl)
-    liftIO $ threadDelay 500000
-    clear
-    liftIO $ threadDelay 500000
-    loop
+  DrawTexture (JSTexture img) source dest -> do
+    let Rect (V2 sx sy) (V2 sw sh) = source
+        Rect (V2 dx dy) (V2 dw dh) = dest
+    sendM $ do
+      args <- traverse toJSVal [sx,sy,sw,sh,dx,dy,dw,dh]
+      void $ ctx ^. jsf "drawImage" (img : args)
+  TextureLoad fp -> sendM $ do
+    doc <- jsg "document"
+    img <- doc ^. js1 "createElement" "img"
+    img ^. jss "src" fp
+    return $ Right $ JSTexture img
+  TextureSize (JSTexture img) ->
+    sendM
+      $ V2 <$> (img ^. js "naturalWidth" >>= fromJSValUnchecked)
+           <*> (img ^. js "naturalHeight" >>= fromJSValUnchecked)
+  TextureIsLoaded (JSTexture img) ->
+    sendM
+      $ img ^. js "complete" >>= fromJSValUnchecked
 
 
 myApp :: JSM ()
 myApp = do
-  cvs <- getNewCanvas
+  cvs <- getNewJSCanvas
   doc <- jsg "document"
   bdy <- doc ^. js "body"
-  void $ bdy ^. js1 "appendChild" (canvasVal cvs)
+  void $ bdy ^. js1 "appendChild" (canvasWindow cvs)
   runM
     $ runIO @JSM
     $ runRenders2dInJSaddle cvs drawingStuff

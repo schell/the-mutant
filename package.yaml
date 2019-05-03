@@ -18,10 +18,12 @@ dependencies:
 - data-fix
 - jsaddle
 - jsaddle-warp
+- JuicyPixels
 - lens
 - linear
 - polysemy
 - polysemy-plugin
+- sdl2
 - text
 - vector
 
