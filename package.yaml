@@ -59,6 +59,7 @@ executables:
     - -flate-specialise
     - -fspecialise-aggressively
     dependencies:
+    - async
     - the-mutant
 
 

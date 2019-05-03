@@ -80,38 +80,38 @@ runRenders2dInSDL
   -> Sem (SDLRenders2d ': r) a
   -> Sem r a
 runRenders2dInSDL canvas@(Canvas _ r) = interpret $ \case
-  Clear -> sendM $ do
+  Clear -> do
     SDL.clear r
     SDL.rendererDrawColor r $= V4 0 0 0 0
     SDL.fillRect r Nothing
-  Present -> sendM $ SDL.present r
+  Present -> SDL.present r
   GetDimensions -> sendM $ getDims canvas
-  DrawLine start end ->
+  SetDrawColor c -> SDL.rendererDrawColor r $= (fromIntegral <$> c)
+  StrokeLine (Line start end) ->
     SDL.drawLine r
       (P $ fromIntegral <$> start)
       (P $ fromIntegral <$> end)
-  DrawRect rect ->
-    SDL.drawRect r (Just $ rect2Rectangle rect)
-  DrawTexture (SDLTexture tex) source dest ->
-    sendM
-      $ SDL.copy
-          r
-          tex
-          (Just $ rect2Rectangle source)
-          (Just $ rect2Rectangle dest)
-  TextureLoad path -> sendM $ do
-    eDynImg <- readImage path
+  StrokeRect rect -> SDL.drawRect r (Just $ rect2Rectangle rect)
+  FillRect rect -> SDL.fillRect r (Just $ rect2Rectangle rect)
+  FillTexture (SDLTexture tex) source dest ->
+    SDL.copy
+      r
+      tex
+      (Just $ rect2Rectangle source)
+      (Just $ rect2Rectangle dest)
+  TextureLoad path -> do
+    eDynImg <- sendM $ readImage path
     for eDynImg $ \img -> do
       let rgba8Img = convertRGBA8 img
           size = fromIntegral <$> V2 (imageWidth rgba8Img) (imageHeight rgba8Img)
-          pitch = fromIntegral $ imageWidth rgba8Img * 4 * 8
+          pitch = fromIntegral $ imageWidth rgba8Img * 4
           bytes = imageData rgba8Img
-      iovec <- thaw bytes
+      iovec <- sendM $ thaw bytes
       surface <- SDL.createRGBSurfaceFrom iovec size pitch SDL.RGBA8888
       tex <- SDL.createTextureFromSurface r surface
       SDL.freeSurface surface
       return $ SDLTexture tex
-  TextureSize (SDLTexture tex) -> sendM $ do
+  TextureSize (SDLTexture tex) -> do
     info <- SDL.queryTexture tex
     return
       $ fromIntegral
