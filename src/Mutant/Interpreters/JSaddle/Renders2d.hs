@@ -8,6 +8,7 @@
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE RecursiveDo           #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE StandaloneDeriving    #-}
 {-# LANGUAGE TemplateHaskell       #-}
@@ -20,10 +21,11 @@ module Mutant.Interpreters.JSaddle.Renders2d where
 import           Control.Lens                           ((^.))
 import           Control.Monad                          (void)
 import           Control.Monad.IO.Class                 (MonadIO (..))
-import           Language.Javascript.JSaddle            (JSM, JSVal,
-                                                         fromJSValUnchecked, js,
-                                                         js0, js1, js2, js4,
-                                                         jsf, jsg, jss, toJSVal)
+import           Language.Javascript.JSaddle            (Function, JSM, JSVal,
+                                                         fromJSValUnchecked,
+                                                         function, js, js0, js1,
+                                                         js2, js4, jsf, jsg,
+                                                         jss, toJSVal)
 import           Language.Javascript.JSaddle.WebSockets (jsaddleWithAppOr)
 import           Linear                                 (V2 (..), V4 (..))
 import           Network.Wai.Application.Static         (defaultWebAppSettings,
@@ -52,6 +54,7 @@ getNewJSCanvas (V2 w h) assetPrefix = do
   void $ cvs ^. jss "width" w
   void $ cvs ^. jss "height" h
   ctx  <- cvs ^. js1 "getContext" "2d"
+  void $ ctx ^. jss "specialId" "root"
   return Canvas
          { canvasWindow = cvs
          , canvasCtx = ctx
@@ -79,50 +82,114 @@ toCSSColor (V4 r g b a) =
     ]
 
 
+initiateTexture :: JSVal -> JSVal -> JSVal -> JSM Function
+initiateTexture cvs img tex = do
+  zero <- toJSVal (0 :: Int)
+  rec cb <-
+         function $ \_ _ _ -> do
+           width <- img ^. js "naturalWidth"
+           height <- img ^. js "naturalHeight"
+           liftIO $ putStrLn "Image is loaded!"
+           w :: Int <- fromJSValUnchecked width
+           h :: Int <- fromJSValUnchecked height
+           liftIO $ print (w,h)
+           void $ cvs ^. jss "width" w
+           void $ cvs ^. jss "height" h
+           let args = [zero, zero, width, height, zero, zero, width, height]
+           void $ tex ^. jsf "drawImage" (img : args)
+           void $ tex ^. jss "complete" True
+           void $ img ^. js2 "removeEventListener" "load" cb
+  return cb
+
+
 runRenders2dInJSaddle
   :: Member (Lift JSM) r
   => JSCanvas
   -> Sem (JSRenders2d ': r) a
   -> Sem r a
-runRenders2dInJSaddle canvas@(Canvas _ ctx pfx) = interpret $ \case
-  Clear -> sendM $ do
-    V2 w h <- getDims canvas
-    void $ canvasCtx canvas ^. js4 "clearRect" (0 :: Int) (0 :: Int) w h
-  Present -> return ()
-  GetDimensions -> sendM $ getDims canvas
-  SetDrawColor c -> sendM $ do
-    let color = toCSSColor c
-    void $ ctx ^. jss "fillStyle" color
-    void $ ctx ^. jss "strokeStyle" color
-  StrokeLine (Line (V2 x1 y1) (V2 x2 y2)) -> sendM $ do
-    void $ ctx ^. js0 "beginPath"
-    void $ ctx ^. js2 "moveTo" x1 y1
-    void $ ctx ^. js2 "lineTo" x2 y2
-    void $ ctx ^. js0 "stroke"
-  StrokeRect (Rect (V2 x y) (V2 w h)) -> sendM $
-    void $ ctx ^. js4 "strokeRect" x y w h
-  FillRect (Rect (V2 x y) (V2 w h)) -> sendM $
-    void $ ctx ^. js4 "fillRect" x y w h
-  FillTexture (JSTexture img) source dest -> do
+runRenders2dInJSaddle canvas = interpretH $ \case
+  Clear -> do
+    sendM $ do
+      V2 w h <- getDims canvas
+      void $ canvasCtx canvas ^. js4 "clearRect" (0 :: Int) (0 :: Int) w h
+    pureT ()
+  Present -> pureT ()
+  GetDimensions ->
+    sendM (getDims canvas)
+      >>= pureT
+  SetDrawColor c -> do
+    sendM $ do
+      let color = toCSSColor c
+      void $ canvasCtx canvas ^. jss "fillStyle" color
+      void $ canvasCtx canvas ^. jss "strokeStyle" color
+    pureT ()
+  StrokeLine (Line (V2 x1 y1) (V2 x2 y2)) -> do
+    sendM $ do
+      void $ canvasCtx canvas ^. js0 "beginPath"
+      void $ canvasCtx canvas ^. js2 "moveTo" x1 y1
+      void $ canvasCtx canvas ^. js2 "lineTo" x2 y2
+      void $ canvasCtx canvas ^. js0 "stroke"
+    pureT ()
+  StrokeRect (Rect (V2 x y) (V2 w h)) -> do
+    sendM
+      $ void
+      $ canvasCtx canvas ^. js4 "strokeRect" x y w h
+    pureT ()
+  FillRect (Rect (V2 x y) (V2 w h)) -> do
+    sendM
+      $ void
+      $ canvasCtx canvas ^. js4 "fillRect" x y w h
+    sendM $ do
+      specialId :: String <- fromJSValUnchecked =<< canvasCtx canvas ^. js "specialId"
+      liftIO $ putStrLn $ "Fill Rect: " ++ specialId
+    pureT ()
+  FillTexture (JSTexture tex) source dest -> do
     let Rect (V2 sx sy) (V2 sw sh) = source
         Rect (V2 dx dy) (V2 dw dh) = dest
     sendM $ do
+      cvs  <- tex ^. js "canvas"
       args <- traverse toJSVal [sx,sy,sw,sh,dx,dy,dw,dh]
-      void $ ctx ^. jsf "drawImage" (img : args)
-  TextureLoad fp -> sendM $ do
-    let imgPath = pfx ++ fp
-    liftIO $ putStrLn $ "Loading image at " ++ show imgPath
-    doc <- jsg "document"
-    img <- doc ^. js1 "createElement" "img"
-    img ^. jss "src" imgPath
-    return $ Right $ JSTexture img
-  TextureSize (JSTexture img) ->
-    sendM
-      $ V2 <$> (img ^. js "naturalWidth" >>= fromJSValUnchecked)
-           <*> (img ^. js "naturalHeight" >>= fromJSValUnchecked)
-  TextureIsLoaded (JSTexture img) ->
-    sendM
-      $ img ^. js "complete" >>= fromJSValUnchecked
+      void $ canvasCtx canvas ^. jsf "drawImage" (cvs : args)
+    pureT ()
+  TextureLoad fp -> do
+    et <- sendM $ do
+      let imgPath = canvasExtra canvas ++ fp
+      doc <- jsg "document"
+      img <- doc ^. js1 "createElement" "img"
+      cvs <- doc ^. js1 "createElement" "canvas"
+      bdy <- doc ^. js "body"
+      void $ bdy ^. js1 "appendChild" cvs
+      tex <- cvs ^. js1 "getContext" "2d"
+      void $ tex ^. jss "complete" False
+      void $ tex ^. jss "specialId" fp
+      void $ cvs ^. jss "width" (0 :: Int)
+      void $ cvs ^. jss "height" (0 :: Int)
+      cb <- initiateTexture cvs img tex
+      void $ img ^. js2 "addEventListener" "load" cb
+      img ^. jss "src" imgPath
+      return $ Right $ JSTexture tex
+    pureT et
+  TextureSize (JSTexture tex) -> do
+    sz <- sendM $ do
+      cvs <- tex ^. js "canvas"
+      V2 <$> (cvs ^. js "width" >>= fromJSValUnchecked)
+         <*> (cvs ^. js "height" >>= fromJSValUnchecked)
+    pureT sz
+  TextureIsLoaded (JSTexture tex) -> do
+    b <-
+      sendM
+      $ tex ^. js "complete" >>= fromJSValUnchecked
+    pureT b
+  WithTexture (JSTexture tex) m -> do
+    sendM $ liftIO $ putStrLn "withTexture"
+    m1 <- runT m
+    cvs <- sendM $ tex ^. js "canvas"
+    specialId <- sendM $ fromJSValUnchecked =<< tex ^. js "specialId"
+    sendM $ liftIO $ putStrLn specialId
+    sendM $ liftIO $ putStrLn "running withTexture"
+    let newCanvas = Canvas cvs tex (canvasExtra canvas)
+    raise
+      $ runRenders2dInJSaddle newCanvas m1
 
 
 myApp :: JSM ()

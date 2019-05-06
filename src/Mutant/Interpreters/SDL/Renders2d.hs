@@ -82,32 +82,39 @@ runRenders2dInSDL
   => SDLCanvas
   -> Sem (SDLRenders2d ': r) a
   -> Sem r a
-runRenders2dInSDL canvas@(Canvas _ r pfx) = interpret $ \case
+runRenders2dInSDL canvas@(Canvas _ r pfx) = interpretH $ \case
   Clear -> do
     SDL.clear r
     SDL.rendererDrawColor r $= V4 0 0 0 0
     SDL.fillRect r Nothing
-  Present -> SDL.present r
-  GetDimensions -> sendM $ getDims canvas
-  SetDrawColor c -> SDL.rendererDrawColor r $= (fromIntegral <$> c)
-  StrokeLine (Line start end) ->
+    pureT ()
+  Present -> SDL.present r >> pureT ()
+  GetDimensions -> sendM (getDims canvas) >>= pureT
+  SetDrawColor c -> do
+    SDL.rendererDrawColor r $= (fromIntegral <$> c)
+    pureT ()
+  StrokeLine (Line start end) -> do
     SDL.drawLine r
       (P $ fromIntegral <$> start)
       (P $ fromIntegral <$> end)
-  StrokeRect rect -> SDL.drawRect r (Just $ rect2Rectangle rect)
-  FillRect rect -> SDL.fillRect r (Just $ rect2Rectangle rect)
+    pureT ()
+  StrokeRect rect -> do
+    SDL.drawRect r (Just $ rect2Rectangle rect)
+    pureT ()
+  FillRect rect -> do
+    SDL.fillRect r (Just $ rect2Rectangle rect)
+    pureT ()
   FillTexture (SDLTexture tex) source dest -> do
-    liftIO $ putStrLn "Filling texture"
     SDL.copy
       r
       tex
       (Just $ rect2Rectangle source)
       (Just $ rect2Rectangle dest)
-    liftIO $ putStrLn "Filled texture"
+    pureT ()
   TextureLoad path -> do
     let file = pfx ++ path
     eDynImg <- sendM $ readImage file
-    for eDynImg $ \img -> do
+    tex <- for eDynImg $ \img -> do
       let rgba8Img = convertRGBA8 img
           size = fromIntegral <$> V2 (imageWidth rgba8Img) (imageHeight rgba8Img)
           pitch = fromIntegral $ imageWidth rgba8Img * 4
@@ -120,12 +127,25 @@ runRenders2dInSDL canvas@(Canvas _ r pfx) = interpret $ \case
       SDL.freeSurface surface
       SDL.textureBlendMode tex $= SDL.BlendAlphaBlend
       return $ SDLTexture tex
+    pureT tex
   TextureSize (SDLTexture tex) -> do
     info <- SDL.queryTexture tex
-    return
+    pureT
       $ fromIntegral
       <$> V2 (SDL.textureWidth info) (SDL.textureHeight info)
-  TextureIsLoaded _ -> return True
+  TextureIsLoaded _ -> pureT True
+  WithTexture (SDLTexture tex) m -> do
+    prev <-
+      sendM
+      $ SDL.get
+      $ SDL.rendererRenderTarget r
+    sendM $ SDL.rendererRenderTarget r $= Just tex
+    m1 <- runT m
+    a <-
+      raise
+        $ runRenders2dInSDL canvas m1
+    sendM $ SDL.rendererRenderTarget r $= prev
+    return a
 
 
 renders2dTest :: IO ()

@@ -52,6 +52,7 @@ data Renders2dBackend
 
 
 data family Texture (i :: Renders2dBackend)
+data family Font (i :: Renders2dBackend)
 
 
 data Renders2d (i :: Renders2dBackend) (m :: Type -> Type) a where
@@ -70,6 +71,11 @@ data Renders2d (i :: Renders2dBackend) (m :: Type -> Type) a where
   TextureLoad     :: String -> Renders2d i m (Either String (Texture i))
   TextureSize     :: Texture i -> Renders2d i m (V2 Int)
   TextureIsLoaded :: Texture i -> Renders2d i m Bool
+  WithTexture :: Texture i -> m a -> Renders2d i m a
+
+  --FontLoad :: String -> V2 Int -> Renders2d i m (Font i)
+  --FontIsLoaded :: Font i -> Renders2d i m Bool
+  -- TODO: Screenshot API
 makeSem ''Renders2d
 
 
@@ -99,6 +105,7 @@ drawingStuff = do
       black = V4 0 0 0 255
       white = V4 255 255 255 255
       cyan = V4 0 255 255 255
+      canary = V4 255 255 0 255
   clear
   -- first draw the screen black
   setDrawColor black
@@ -122,14 +129,24 @@ drawingStuff = do
   fix $ \loop -> do
     loaded <- textureIsLoaded tex
     unless loaded loop
-  tsz <- textureSize tex
+  tsz@(V2 _ th) <- textureSize tex
   liftIO $ putStrLn $ "Texture size is " ++ show tsz
   -- draw the texture to the screen
-  let pos :: V2 Float = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
+  let posf :: V2 Float = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
+      pos = floor <$> posf
   fillTexture
     tex
     (Rect 0 tsz)
-    (Rect (floor <$> pos) tsz)
+    (Rect pos tsz)
+  -- do some higher-order drawing into the texture itself
+  withTexture tex $ do
+    liftIO $ putStrLn "in higher order"
+    setDrawColor canary
+    fillRect (Rect 0 25)
+  --fillTexture
+  --  tex
+  --  (Rect 0 tsz)
+  --  (Rect (pos + V2 0 th) tsz)
   -- present it
   fix $ \loop -> do
     present
