@@ -17,16 +17,21 @@
 {-# OPTIONS_GHC -fplugin=Polysemy.Plugin         #-}
 module Mutant.Interpreters.JSaddle.Renders2d where
 
-import           Control.Lens                     ((^.))
-import           Control.Monad                    (void)
-import           Language.Javascript.JSaddle      (JSM, JSVal,
-                                                   fromJSValUnchecked, js, js0,
-                                                   js1, js2, js4, jsf, jsg, jss,
-                                                   toJSVal)
-import           Language.Javascript.JSaddle.Warp (run)
-import           Linear                           (V2 (..), V4 (..))
-import           Polysemy                         hiding (run)
-import           Polysemy.IO                      (runIO)
+import           Control.Lens                           ((^.))
+import           Control.Monad                          (void)
+import           Control.Monad.IO.Class                 (MonadIO (..))
+import           Language.Javascript.JSaddle            (JSM, JSVal,
+                                                         fromJSValUnchecked, js,
+                                                         js0, js1, js2, js4,
+                                                         jsf, jsg, jss, toJSVal)
+import           Language.Javascript.JSaddle.WebSockets (jsaddleWithAppOr)
+import           Linear                                 (V2 (..), V4 (..))
+import           Network.Wai.Application.Static         (defaultWebAppSettings,
+                                                         staticApp)
+import           Network.Wai.Handler.Warp               (run)
+import           Network.WebSockets.Connection          (defaultConnectionOptions)
+import           Polysemy                               hiding (run)
+import           Polysemy.IO                            (runIO)
 
 import           Mutant.Eff.Renders2d
 
@@ -40,10 +45,12 @@ type JSRenders2d = Renders2d 'Renders2dJSaddle
 data instance Texture 'Renders2dJSaddle = JSTexture JSVal
 
 
-getNewJSCanvas :: String -> JSM JSCanvas
-getNewJSCanvas assetPrefix = do
+getNewJSCanvas :: V2 Int -> String -> JSM JSCanvas
+getNewJSCanvas (V2 w h) assetPrefix = do
   doc  <- jsg "document"
   cvs  <- doc ^. js1 "createElement" "canvas"
+  void $ cvs ^. jss "width" w
+  void $ cvs ^. jss "height" h
   ctx  <- cvs ^. js1 "getContext" "2d"
   return Canvas
          { canvasWindow = cvs
@@ -103,11 +110,11 @@ runRenders2dInJSaddle canvas@(Canvas _ ctx pfx) = interpret $ \case
       args <- traverse toJSVal [sx,sy,sw,sh,dx,dy,dw,dh]
       void $ ctx ^. jsf "drawImage" (img : args)
   TextureLoad fp -> sendM $ do
+    let imgPath = pfx ++ fp
+    liftIO $ putStrLn $ "Loading image at " ++ show imgPath
     doc <- jsg "document"
     img <- doc ^. js1 "createElement" "img"
-    img ^. jss "src" (pfx ++ fp)
-    bdy <- doc ^. js "body"
-    void $ bdy ^. js1 "appendChild" img
+    img ^. jss "src" imgPath
     return $ Right $ JSTexture img
   TextureSize (JSTexture img) ->
     sendM
@@ -120,7 +127,7 @@ runRenders2dInJSaddle canvas@(Canvas _ ctx pfx) = interpret $ \case
 
 myApp :: JSM ()
 myApp = do
-  cvs <- getNewJSCanvas
+  cvs <- getNewJSCanvas (V2 640 480) "http://localhost:8888/"
   doc <- jsg "document"
   bdy <- doc ^. js "body"
   void $ bdy ^. js1 "appendChild" (canvasWindow cvs)
@@ -132,4 +139,8 @@ myApp = do
 renders2dTest :: IO ()
 renders2dTest = do
   putStrLn "running at http://localhost:8888"
-  run 8888 myApp
+  app <-
+    jsaddleWithAppOr defaultConnectionOptions myApp
+      $ staticApp
+      $ defaultWebAppSettings "assets/"
+  run 8888 app

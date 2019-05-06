@@ -26,6 +26,9 @@ dependencies:
 - sdl2
 - text
 - vector
+- wai-app-static
+- warp
+- websockets
 
 library:
   source-dirs: src

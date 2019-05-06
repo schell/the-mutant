@@ -9,6 +9,7 @@
 {-# LANGUAGE TypeOperators       #-}
 module Mutant.Eff.Renders2d where
 
+import           Control.Concurrent     (threadDelay)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Kind              (Type)
 --import           Data.Vector.Storable (Vector)
@@ -89,6 +90,7 @@ drawingStuff
   => Sem r ()
 drawingStuff = do
   wh@(V2 w h) <- getDimensions
+  liftIO $ putStrLn $ "Context has dimensions " ++ show wh
   let tl = 10
       tr = V2 (w - 10) 10
       br = V2 (w - 10) (h - 10)
@@ -111,7 +113,7 @@ drawingStuff = do
   traverse_ strokeLine lns
   -- load an image
   tex <-
-    textureLoad "assets/sot.png"
+    textureLoad "sot.png"
       >>= either
             fail
             return
@@ -121,7 +123,7 @@ drawingStuff = do
     loaded <- textureIsLoaded tex
     unless loaded loop
   tsz <- textureSize tex
-  liftIO $ print tsz
+  liftIO $ putStrLn $ "Texture size is " ++ show tsz
   -- draw the texture to the screen
   let pos :: V2 Float = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
   fillTexture
@@ -129,4 +131,7 @@ drawingStuff = do
     (Rect 0 tsz)
     (Rect (floor <$> pos) tsz)
   -- present it
-  present
+  fix $ \loop -> do
+    present
+    liftIO $ threadDelay 1000000
+    loop
