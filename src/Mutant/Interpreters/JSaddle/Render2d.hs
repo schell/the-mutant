@@ -16,7 +16,6 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
-{-# OPTIONS_GHC -fplugin=Polysemy.Plugin         #-}
 module Mutant.Interpreters.JSaddle.Render2d where
 
 import           Control.Lens                           ((^.))
@@ -43,10 +42,10 @@ import           Mutant.Eff.Render2d
 type JSCanvas = Canvas JSVal JSVal String
 
 
-type JSRender2d = Render2d 'Render2dJSaddle
+type JSRender2d = Render2d 'Render2dJS
 
 
-data instance Texture 'Render2dJSaddle = JSTexture JSVal
+data instance Texture 'Render2dJS = JSTexture JSVal
 
 
 getNewJSCanvas :: MonadJSM m => V2 Int -> String -> m JSCanvas

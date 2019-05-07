@@ -42,7 +42,7 @@ data Line a
 
 
 data Render2dBackend
-  = Render2dJSaddle
+  = Render2dJS
   | Render2dSDL
 
 
@@ -69,11 +69,6 @@ data Render2d (i :: Render2dBackend) (m :: Type -> Type)
   , textureIsLoaded :: Texture i -> m Bool
   , withTexture     :: forall a. Texture i -> m a -> m a
   }
-
-
-  --FontLoad :: String -> V2 Int -> Render2d i m (Font i)
-  --FontIsLoaded :: Font i -> Render2d i m Bool
-  -- TODO: Screenshot API
 
 
 -- | Helps with writing interpreters.
