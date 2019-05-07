@@ -107,7 +107,20 @@ runRenders2dInJSaddle
   => JSCanvas
   -> Sem (JSRenders2d ': r) a
   -> Sem r a
-runRenders2dInJSaddle canvas = interpretH $ \case
+runRenders2dInJSaddle canvas s = do
+  ctxName :: String <-
+    sendM
+      (fromJSValUnchecked =<< canvasCtx canvas ^. js "specialId")
+  sendM $ liftIO $ putStrLn $ "ctx: " ++ ctxName
+  runRenders canvas s
+
+
+runRenders
+  :: Member (Lift JSM) r
+  => JSCanvas
+  -> Sem (JSRenders2d ': r) a
+  -> Sem r a
+runRenders canvas = interpretH $ \case
   Clear -> do
     sendM $ do
       V2 w h <- getDims canvas
