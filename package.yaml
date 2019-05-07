@@ -21,8 +21,6 @@ dependencies:
 - JuicyPixels
 - lens
 - linear
-- polysemy
-- polysemy-plugin
 - sdl2
 - text
 - vector
@@ -33,8 +31,6 @@ dependencies:
 library:
   source-dirs: src
   ghc-options:
-  - -fplugin=Polysemy.Plugin
-  - -fconstraint-solver-iterations=0
   - -Wall
 
 executables:
@@ -45,9 +41,6 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -O2
-    - -flate-specialise
-    - -fspecialise-aggressively
     dependencies:
     - the-mutant
 
@@ -58,9 +51,6 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -O2
-    - -flate-specialise
-    - -fspecialise-aggressively
     dependencies:
     - async
     - the-mutant

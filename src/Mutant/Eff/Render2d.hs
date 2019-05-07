@@ -1,23 +1,18 @@
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE KindSignatures      #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell     #-}
-{-# LANGUAGE TypeFamilies        #-}
-{-# LANGUAGE TypeOperators       #-}
-module Mutant.Eff.Renders2d where
+{-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE KindSignatures  #-}
+{-# LANGUAGE RankNTypes      #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies    #-}
+module Mutant.Eff.Render2d where
 
 import           Control.Concurrent     (threadDelay)
-import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.IO.Class (MonadIO (..))
 import           Data.Kind              (Type)
 --import           Data.Vector.Storable (Vector)
 import           Control.Monad          (unless)
 import           Data.Foldable          (traverse_)
 import           Data.Function          (fix)
 import           Linear                 (V2 (..), V4 (..))
-import           Polysemy               hiding (run)
 
 
 data Rect a
@@ -46,37 +41,39 @@ data Line a
   }
 
 
-data Renders2dBackend
-  = Renders2dJSaddle
-  | Renders2dSDL
+data Render2dBackend
+  = Render2dJSaddle
+  | Render2dSDL
 
 
-data family Texture (i :: Renders2dBackend)
-data family Font (i :: Renders2dBackend)
+data family Texture (i :: Render2dBackend)
+data family Font (i :: Render2dBackend)
 
 
-data Renders2d (i :: Renders2dBackend) (m :: Type -> Type) a where
-  Clear   :: Renders2d i m ()
-  Present :: Renders2d i m ()
+data Render2d (i :: Render2dBackend) (m :: Type -> Type)
+  = Render2d
+  { clear           :: m ()
+  , present         :: m ()
 
-  GetDimensions :: Renders2d i m (V2 Int)
-  SetDrawColor  :: V4 Int -> Renders2d i m ()
+  , getDimensions   :: m (V2 Int)
+  , setDrawColor    :: V4 Int -> m ()
 
-  StrokeLine :: Line Int -> Renders2d i m ()
-  StrokeRect :: Rect Int -> Renders2d i m ()
+  , strokeLine      :: Line Int -> m ()
+  , strokeRect      :: Rect Int -> m ()
 
-  FillRect :: Rect Int -> Renders2d i m ()
-  FillTexture :: Texture i -> Rect Int -> Rect Int -> Renders2d i m ()
+  , fillRect        :: Rect Int -> m ()
+  , fillTexture     :: Texture i -> Rect Int -> Rect Int -> m ()
 
-  TextureLoad     :: String -> Renders2d i m (Either String (Texture i))
-  TextureSize     :: Texture i -> Renders2d i m (V2 Int)
-  TextureIsLoaded :: Texture i -> Renders2d i m Bool
-  WithTexture :: Texture i -> m a -> Renders2d i m a
+  , textureLoad     :: String -> m (Either String (Texture i))
+  , textureSize     :: Texture i -> m (V2 Int)
+  , textureIsLoaded :: Texture i -> m Bool
+  , withTexture     :: forall a. Texture i -> m a -> m a
+  }
 
-  --FontLoad :: String -> V2 Int -> Renders2d i m (Font i)
-  --FontIsLoaded :: Font i -> Renders2d i m Bool
+
+  --FontLoad :: String -> V2 Int -> Render2d i m (Font i)
+  --FontIsLoaded :: Font i -> Render2d i m Bool
   -- TODO: Screenshot API
-makeSem ''Renders2d
 
 
 -- | Helps with writing interpreters.
@@ -88,13 +85,32 @@ data Canvas window ctx a
   }
 
 
+testTextureSize
+  :: Monad m
+  => Render2d i m
+  -> FilePath
+  -> m Bool
+testTextureSize Render2d{..} fp = do
+  tex <-
+    textureLoad fp
+      >>= either
+            fail
+            return
+  fix $ \loop -> do
+    loaded <- textureIsLoaded tex
+    unless loaded loop
+  tsz <- textureSize tex
+  dim <- withTexture tex getDimensions
+  return $ tsz == dim
+
+
+
 -- | This is a test.
 drawingStuff
-  :: ( Member (Renders2d i) r
-     , Member (Lift IO) r
-     )
-  => Sem r ()
-drawingStuff = do
+  :: MonadIO m
+  => Render2d i m
+  -> m ()
+drawingStuff Render2d{..} = do
   wh@(V2 w h) <- getDimensions
   liftIO $ putStrLn $ "Context has dimensions " ++ show wh
   let tl = 10
@@ -132,7 +148,8 @@ drawingStuff = do
   tsz@(V2 _ th) <- textureSize tex
   liftIO $ putStrLn $ "Texture size is " ++ show tsz
   -- draw the texture to the screen
-  let posf :: V2 Float = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
+  let posf :: V2 Float
+      posf = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
       pos = floor <$> posf
   fillTexture
     tex
@@ -140,13 +157,14 @@ drawingStuff = do
     (Rect pos tsz)
   -- do some higher-order drawing into the texture itself
   withTexture tex $ do
-    liftIO $ putStrLn "in higher order"
+    texDims <- getDimensions
+    liftIO $ putStrLn $ "textures dimensions are:" ++ show texDims
     setDrawColor canary
     fillRect (Rect 0 25)
-  --fillTexture
-  --  tex
-  --  (Rect 0 tsz)
-  --  (Rect (pos + V2 0 th) tsz)
+  fillTexture
+    tex
+    (Rect 0 tsz)
+    (Rect (pos + V2 0 th) tsz)
   -- present it
   fix $ \loop -> do
     present

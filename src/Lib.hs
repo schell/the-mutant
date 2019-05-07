@@ -19,24 +19,24 @@
 module Lib where
 
 import           Control.Arrow                    ((&&&))
-import           Control.Exception                (Exception, throwIO)
+import           Control.Exception                (Exception{-, throwIO-})
 import           Control.Lens                     ((^.))
 import           Control.Monad                    (void)
 import           Control.Monad.IO.Class           (MonadIO (..))
 import           Data.IntMap.Strict               (IntMap)
 import qualified Data.IntMap.Strict               as IM
-import qualified Data.Text                        as T
-import           GHC.Conc                         (TVar, atomically, newTVar,
+--import qualified Data.Text                        as T
+import           GHC.Conc                         (TVar, atomically, {-newTVar,-}
                                                    readTVar, writeTVar)
 import           Language.Javascript.JSaddle      (JSM, JSVal, function, js,
                                                    js1, js2, jsg, jss)
-import           Language.Javascript.JSaddle.Warp (run)
+--import           Language.Javascript.JSaddle.Warp (run)
 import           Polysemy                         hiding (run)
-import           Polysemy.Error                   (Error, runError, throw)
-import           Polysemy.IO                      (runIO)
+import           Polysemy.Error                   (Error, {-runError,-} throw)
+--import           Polysemy.IO                      (runIO)
 import           Polysemy.State                   (State (..), gets, modify)
 
-import           Mutant.Eff.Mutates
+--import           Mutant.Eff.Mutates
 import           Mutant.Eff.UI
 
 
@@ -188,31 +188,31 @@ runUI finish = interpretH $ \case
 
 
 
-myApp
-  :: ( Member UI r
-     , Member (Lift IO ) r
-     , Member Mutates r
-     )
-  => Sem r ()
-myApp = do
-  stage <- getStage
-  label <- newLabel $ T.pack "Count: 0"
-  var   <- newSlot @Int 0
-  appendChild (stageNode stage) (labelNode label)
-
-  void
-    $ addListener (stageNode stage) EventClick
-    $ do
-      clicks <- withSlot var succ
-      updateLabel label
-        $ T.pack
-        $ unwords
-          [ "Count: "
-          , show clicks
-          ]
-
-  liftIO
-    $ putStrLn "ready..."
+--myApp
+--  :: ( Member UI r
+--     , Member (Lift IO ) r
+--     , Member Mutates r
+--     )
+--  => Sem r ()
+--myApp = do
+--  stage <- getStage
+--  label <- newLabel $ T.pack "Count: 0"
+--  var   <- newSlot @Int 0
+--  appendChild (stageNode stage) (labelNode label)
+--
+--  void
+--    $ addListener (stageNode stage) EventClick
+--    $ do
+--      clicks <- withSlot var succ
+--      updateLabel label
+--        $ T.pack
+--        $ unwords
+--          [ "Count: "
+--          , show clicks
+--          ]
+--
+--  liftIO
+--    $ putStrLn "ready..."
 
 
 runStateInTVar
@@ -230,31 +230,31 @@ runStateInTVar var = interpretH $ \case
       >> pureT ()
 
 
-uiTest :: IO ()
-uiTest = do
-  putStrLn "starting the app at http://localhost:8888"
-  var <- atomically $ newTVar initialBrowserData
-  run 8888
-    $ void
-    $ runM
-    $ runIO @JSM
-    $ runError
-    $ runSlot
-    $ runStateInTVar var
-    $ runUI
-        ( handleEnd
-        . runM
-        . runIO @JSM
-        . runError
-        . runSlot
-        . runStateInTVar var
-        )
-        myApp
-  where
-    handleEnd
-      :: JSM (Either BrowserError x) -> JSM x
-    handleEnd f =
-      f >>=
-        either
-          (liftIO . throwIO)
-          return
+--uiTest :: IO ()
+--uiTest = do
+--  putStrLn "starting the app at http://localhost:8888"
+--  var <- atomically $ newTVar initialBrowserData
+--  run 8888
+--    $ void
+--    $ runM
+--    $ runIO @JSM
+--    $ runError
+--    $ runSlot
+--    $ runStateInTVar var
+--    $ runUI
+--        ( handleEnd
+--        . runM
+--        . runIO @JSM
+--        . runError
+--        . runSlot
+--        . runStateInTVar var
+--        )
+--        myApp
+--  where
+--    handleEnd
+--      :: JSM (Either BrowserError x) -> JSM x
+--    handleEnd f =
+--      f >>=
+--        either
+--          (liftIO . throwIO)
+--          return

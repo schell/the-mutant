@@ -1,9 +1,9 @@
 {-# LANGUAGE LambdaCase #-}
-import           Control.Concurrent.Async              (async, cancel)
-import           Data.Foldable                         (traverse_)
-import qualified Mutant.Interpreters.JSaddle.Renders2d as JS
-import qualified Mutant.Interpreters.SDL.Renders2d     as SDL
-import           System.Environment                    (getArgs)
+import           Control.Concurrent.Async             (async, cancel)
+import           Data.Foldable                        (traverse_)
+import qualified Mutant.Interpreters.JSaddle.Render2d as JS
+import qualified Mutant.Interpreters.SDL.Render2d     as SDL
+import           System.Environment                   (getArgs)
 
 
 main :: IO ()

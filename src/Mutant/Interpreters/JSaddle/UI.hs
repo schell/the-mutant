@@ -14,8 +14,6 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
-{-# OPTIONS_GHC -fconstraint-solver-iterations=0 #-}
-{-# OPTIONS_GHC -fplugin=Polysemy.Plugin         #-}
 module Mutant.Interpreters.JSaddle.UI where
 
 import           Control.Arrow                    ((&&&))
@@ -188,31 +186,31 @@ runUI finish = interpretH $ \case
 
 
 
-myApp
-  :: ( Member UI r
-     , Member (Lift IO ) r
-     , Member Mutates r
-     )
-  => Sem r ()
-myApp = do
-  stage <- getStage
-  label <- newLabel $ T.pack "Count: 0"
-  var   <- newSlot @Int 0
-  appendChild (stageNode stage) (labelNode label)
-
-  void
-    $ addListener (stageNode stage) EventClick
-    $ do
-      clicks <- withSlot var succ
-      updateLabel label
-        $ T.pack
-        $ unwords
-          [ "Count: "
-          , show clicks
-          ]
-
-  liftIO
-    $ putStrLn "ready..."
+--myApp
+--  :: ( Member UI r
+--     , Member (Lift IO ) r
+--     , Member Mutates r
+--     )
+--  => Sem r ()
+--myApp = do
+--  stage <- getStage
+--  label <- newLabel $ T.pack "Count: 0"
+--  var   <- newSlot @Int 0
+--  appendChild (stageNode stage) (labelNode label)
+--
+--  void
+--    $ addListener (stageNode stage) EventClick
+--    $ do
+--      clicks <- withSlot var succ
+--      updateLabel label
+--        $ T.pack
+--        $ unwords
+--          [ "Count: "
+--          , show clicks
+--          ]
+--
+--  liftIO
+--    $ putStrLn "ready..."
 
 
 runStateInTVar
@@ -230,31 +228,31 @@ runStateInTVar var = interpretH $ \case
       >> pureT ()
 
 
-uiTest :: IO ()
-uiTest = do
-  putStrLn "starting the app at http://localhost:8888"
-  var <- atomically $ newTVar initialBrowserData
-  run 8888
-    $ void
-    $ runM
-    $ runIO @JSM
-    $ runError
-    $ runSlot
-    $ runStateInTVar var
-    $ runUI
-        ( handleEnd
-        . runM
-        . runIO @JSM
-        . runError
-        . runSlot
-        . runStateInTVar var
-        )
-        myApp
-  where
-    handleEnd
-      :: JSM (Either BrowserError x) -> JSM x
-    handleEnd f =
-      f >>=
-        either
-          (liftIO . throwIO)
-          return
+--uiTest :: IO ()
+--uiTest = do
+--  putStrLn "starting the app at http://localhost:8888"
+--  var <- atomically $ newTVar initialBrowserData
+--  run 8888
+--    $ void
+--    $ runM
+--    $ runIO @JSM
+--    $ runError
+--    $ runSlot
+--    $ runStateInTVar var
+--    $ runUI
+--        ( handleEnd
+--        . runM
+--        . runIO @JSM
+--        . runError
+--        . runSlot
+--        . runStateInTVar var
+--        )
+--        myApp
+--  where
+--    handleEnd
+--      :: JSM (Either BrowserError x) -> JSM x
+--    handleEnd f =
+--      f >>=
+--        either
+--          (liftIO . throwIO)
+--          return
