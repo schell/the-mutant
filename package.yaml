@@ -16,14 +16,18 @@ dependencies:
 - base >= 4.7 && < 5
 - containers
 - data-fix
+- freetype2
 - jsaddle
 - jsaddle-warp
 - JuicyPixels
 - lens
 - linear
+- mtl
+- neat-interpolation
 - sdl2
 - text
 - transformers
+- typograffiti-sdl
 - vector
 - wai-app-static
 - warp

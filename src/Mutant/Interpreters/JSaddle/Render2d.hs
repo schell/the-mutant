@@ -7,6 +7,7 @@
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE RecursiveDo           #-}
@@ -21,22 +22,25 @@ module Mutant.Interpreters.JSaddle.Render2d where
 import           Control.Lens                           ((^.))
 import           Control.Monad                          (void)
 import           Control.Monad.IO.Class                 (MonadIO (..))
+import           Data.Text                              (Text)
+import qualified Data.Text                              as T
 import           Language.Javascript.JSaddle            (Function, JSM, JSVal,
-                                                         MonadJSM,
+                                                         MonadJSM, call, eval,
                                                          fromJSValUnchecked,
-                                                         function, js, js0, js1,
-                                                         js2, js4, jsf, jsg,
-                                                         jss, liftJSM, toJSVal)
+                                                         function, global, js,
+                                                         js0, js1, js2, js4,
+                                                         jsf, jsg, jss, liftJSM,
+                                                         toJSVal)
 import           Language.Javascript.JSaddle.WebSockets (jsaddleWithAppOr)
 import           Linear                                 (V2 (..), V4 (..))
+import           NeatInterpolation
 import           Network.Wai.Application.Static         (defaultWebAppSettings,
                                                          staticApp)
 import           Network.Wai.Handler.Warp               (run)
 import           Network.WebSockets.Connection          (defaultConnectionOptions)
 
-import           Mutant.Eff.Mutates                     (Mutates (..),
-                                                         mutatesTVar)
-import           Mutant.Eff.Render2d
+import           Mutant.API.Render2d
+import           Mutant.Slot
 
 
 type JSCanvas = Canvas JSVal JSVal String
@@ -45,7 +49,9 @@ type JSCanvas = Canvas JSVal JSVal String
 type JSRender2d = Render2d 'Render2dJS
 
 
+-- Everything is a JSVal!
 data instance Texture 'Render2dJS = JSTexture JSVal
+data instance Font 'Render2dJS = JSFont Text
 
 
 getNewJSCanvas :: MonadJSM m => V2 Int -> String -> m JSCanvas
@@ -83,8 +89,8 @@ toCSSColor (V4 r g b a) =
     ]
 
 
-initiateTexture :: JSVal -> JSVal -> JSVal -> JSM Function
-initiateTexture cvs img tex = do
+initiateTexture :: JSVal -> JSVal -> JSVal -> Slot (LoadStatus (Texture 'Render2dJS)) -> JSM Function
+initiateTexture cvs img tex tvar = do
   zero <- toJSVal (0 :: Int)
   rec cb <-
          function $ \_ _ _ -> do
@@ -93,23 +99,44 @@ initiateTexture cvs img tex = do
            liftIO $ putStrLn "Image is loaded!"
            w :: Int <- fromJSValUnchecked width
            h :: Int <- fromJSValUnchecked height
-           liftIO $ print (w,h)
            void $ cvs ^. jss "width" w
            void $ cvs ^. jss "height" h
            let args = [zero, zero, width, height, zero, zero, width, height]
            void $ tex ^. jsf "drawImage" (img : args)
            void $ tex ^. jss "complete" True
+           writeSlot tvar
+             $ LoadStatusSuccess
+             $ JSTexture tex
            void $ img ^. js2 "removeEventListener" "load" cb
   return cb
 
 
+fontLoadingFunction :: Text -> Text -> Text
+fontLoadingFunction nam url =
+  [text|
+  async function(success) {
+      const font = new FontFace('${nam}', 'url($url)');
+      // wait for font to be loaded
+      await font.load();
+      // add font to document
+      document.fonts.add(font);
+      // call the callback
+      success(font);
+  }
+  |]
+
+
+toCSSFontStr :: Text -> V2 Int -> String
+toCSSFontStr font (V2 w _) = T.unpack font ++ " " ++ show w ++ "px"
+
+
 renderer2dJSaddle
   :: MonadJSM m
-  => Mutates m
-  -> JSCanvas
+  => JSCanvas
   -> m (JSRender2d m)
-renderer2dJSaddle Mutates{..} c = do
+renderer2dJSaddle c = do
   s <- newSlot c
+  k <- newSlot (0 :: Int)
   return
     Render2d
     { clear = do
@@ -118,14 +145,18 @@ renderer2dJSaddle Mutates{..} c = do
         void
           $ liftJSM
           $ canvasCtx canvas ^. js4 "clearRect" (0 :: Int) (0 :: Int) w h
+
     , present = return ()
+
     , getDimensions = readSlot s >>= getDims
+
     , setDrawColor = \v4Color -> do
         canvas <- readSlot s
         liftJSM $ do
           let color = toCSSColor v4Color
           void $ canvasCtx canvas ^. jss "fillStyle" color
           void $ canvasCtx canvas ^. jss "strokeStyle" color
+
     , strokeLine = \(Line (V2 x1 y1) (V2 x2 y2)) -> do
         canvas <- readSlot s
         liftJSM $ do
@@ -133,17 +164,17 @@ renderer2dJSaddle Mutates{..} c = do
           void $ canvasCtx canvas ^. js2 "moveTo" x1 y1
           void $ canvasCtx canvas ^. js2 "lineTo" x2 y2
           void $ canvasCtx canvas ^. js0 "stroke"
+
     , strokeRect = \(Rect (V2 x y) (V2 w h)) -> do
         canvas <- readSlot s
         void
           $ liftJSM
           $ canvasCtx canvas ^. js4 "strokeRect" x y w h
-    , fillRect = \(Rect (V2 x y) (V2 w h)) -> do
+
+    , fillRect = \(Rect (V2 x y) (V2 w h)) -> liftJSM $ do
         canvas <- readSlot s
-        liftJSM $ do
-          void $ canvasCtx canvas ^. js4 "fillRect" x y w h
-          specialId :: String <- fromJSValUnchecked =<< canvasCtx canvas ^. js "specialId"
-          liftIO $ putStrLn $ "Fill Rect: " ++ specialId
+        void $ canvasCtx canvas ^. js4 "fillRect" x y w h
+
     , fillTexture = \(JSTexture tex) source dest -> do
         canvas <- readSlot s
         liftJSM $ do
@@ -152,7 +183,16 @@ renderer2dJSaddle Mutates{..} c = do
           cvs  <- tex ^. js "canvas"
           args <- traverse toJSVal [sx,sy,sw,sh,dx,dy,dw,dh]
           void $ canvasCtx canvas ^. jsf "drawImage" (cvs : args)
-    , textureLoad = \fp -> do
+
+    , fillText = \(JSFont font) sz color (V2 x y) txt -> liftJSM $ do
+        let fontStr = toCSSFontStr font sz
+            cssClr = toCSSColor color
+        canvas <- readSlot s
+        void $ canvasCtx canvas ^. jss "font" fontStr
+        void $ canvasCtx canvas ^. jss "fillStyle" cssClr
+        void $ canvasCtx canvas ^. jsf "fillText" [txt, show x, show y]
+
+    , texture = \fp -> do
         canvas <- readSlot s
         liftJSM $ do
           let imgPath = canvasExtra canvas ++ fp
@@ -163,26 +203,46 @@ renderer2dJSaddle Mutates{..} c = do
           void $ tex ^. jss "complete" False
           void $ cvs ^. jss "width" (0 :: Int)
           void $ cvs ^. jss "height" (0 :: Int)
-          cb <- initiateTexture cvs img tex
+          tvar <- newSlot LoadStatusLoading
+          cb <- initiateTexture cvs img tex tvar
+          -- TODO: Also add a listener for texture error
           void $ img ^. js2 "addEventListener" "load" cb
           img ^. jss "src" imgPath
-          return $ Right $ JSTexture tex
+          return tvar
+
     , textureSize = \(JSTexture tex) -> do
         liftJSM $ do
           cvs <- tex ^. js "canvas"
           V2 <$> (cvs ^. js "width" >>= fromJSValUnchecked)
-            <*> (cvs ^. js "height" >>= fromJSValUnchecked)
-    , textureIsLoaded = \(JSTexture tex) -> do
-        liftJSM
-          $ tex ^. js "complete" >>= fromJSValUnchecked
+             <*> (cvs ^. js "height" >>= fromJSValUnchecked)
+
     , withTexture = \(JSTexture tex) m -> do
         canvas <- readSlot s
         cvs <- liftJSM $ tex ^. js "canvas"
         let newCanvas = Canvas cvs tex (canvasExtra canvas)
-        updateSlot s newCanvas
+        writeSlot s newCanvas
         a <- m
-        updateSlot s canvas
+        writeSlot s canvas
         return a
+
+    , font = \file -> liftJSM $ do
+        fvar <- newSlot LoadStatusLoading
+
+        n <- withSlot k succ
+        canvas <- readSlot s
+        let url = T.pack $ canvasExtra canvas ++ file
+            nam = T.pack $ "font" ++ show n
+
+        -- TODO: Handle the case where JSM font loading fails
+        successCB <- function $ \_ _ _ ->
+          writeSlot fvar
+            $ LoadStatusSuccess
+            $ JSFont nam
+
+        loadFun <- eval $ fontLoadingFunction nam url
+        -- TODO: Clean up JSM font loading callbacks
+        void $ call loadFun global [successCB]
+        return fvar
     }
 
 
@@ -192,7 +252,7 @@ myApp = do
   doc <- jsg "document"
   bdy <- doc ^. js "body"
   void $ bdy ^. js1 "appendChild" (canvasWindow cvs)
-  renders2d <- renderer2dJSaddle mutatesTVar cvs
+  renders2d <- renderer2dJSaddle cvs
   drawingStuff renders2d
 
 

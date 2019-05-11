@@ -40,8 +40,12 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 extra-deps:
-- polysemy-0.1.2.0
-- polysemy-plugin-0.1.0.0
+- git: https://github.com/schell/typograffiti.git
+  commit: c8e0b8e470f8fc4f994f2538f5f3c1bb66106a42
+  subdirs:
+  - typograffiti-core
+  - typograffiti-freetype
+  - typograffiti-sdl
 - git: https://gitlab.com/fresheyeball/jsaddle-experimental.git
   commit: 1509d293c7ba9e7bb19157e0ba5c9b41384821ea
   subdirs:
