@@ -18,6 +18,7 @@ module Mutant.Interpreters.SDL.Render2d where
 
 import           Codec.Picture          (convertRGBA8, imageData, imageHeight,
                                          imageWidth, readImage)
+import           Control.Arrow          ((&&&))
 import           Control.Monad.Except   (ExceptT, runExceptT)
 import           Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Text              as T
@@ -27,6 +28,7 @@ import           Linear                 (V2 (..), V4 (..))
 import           SDL                    (Point (..), Rectangle (..), Renderer,
                                          Window, ($=))
 import qualified SDL
+import           System.Directory       (doesFileExist)
 import           Typograffiti.SDL       as Typo
 
 import           Mutant.API.Render2d
@@ -40,7 +42,7 @@ type SDLCanvas = Canvas Window Renderer String
 type SDLRender2d = Render2d 'Render2dSDL
 
 
-data instance Texture 'Render2dSDL = SDLTexture SDL.Texture
+data instance Texture 'Render2dSDL = SDLTexture (Slot SDL.Texture)
 data instance Font 'Render2dSDL = SDLFont FilePath
 
 
@@ -116,14 +118,16 @@ renders2dSDL canvas@(Canvas _ r pfx) = do
     , fillRect = \rect -> do
       SDL.fillRect r (Just $ rect2Rectangle rect)
 
-    , fillTexture = \(SDLTexture tex) source dest -> do
-      SDL.copy
-        r
-        tex
-        (Just $ rect2Rectangle source)
-        (Just $ rect2Rectangle dest)
+    , fillTexture = \(SDLTexture s) source dest -> do
+        tex <- readSlot s
+        SDL.copy
+          r
+          tex
+          (Just $ rect2Rectangle source)
+          (Just $ rect2Rectangle dest)
 
-    , fillText = \(SDLFont file) (V2 w h) clr pos str -> runOrFail $ do
+    , fillText = \(SDLFont file) (V2 w h) pos str -> runOrFail $ do
+        clr <- SDL.get $ SDL.rendererDrawColor r
         let v4clr = (\wrd -> fromIntegral wrd / (255.0 :: Float)) <$> clr
         RenderedGlyphs draw _ <-
             getTextRendering
@@ -149,37 +153,54 @@ renders2dSDL canvas@(Canvas _ r pfx) = do
           tex <- SDL.createTextureFromSurface r surface
           SDL.freeSurface surface
           SDL.textureBlendMode tex $= SDL.BlendAlphaBlend
-          ttex <- SDL.createTexture r SDL.RGBA8888 SDL.TextureAccessTarget size
-          prev <- SDL.get $ SDL.rendererRenderTarget r
-          SDL.rendererRenderTarget r $= Just ttex
-          let source = rect2Rectangle $ Rect 0 size
-          SDL.copy r tex (Just source) (Just source)
-          SDL.rendererRenderTarget r $= prev
-          SDL.destroyTexture tex
-          return ttex
+          return tex
         newSlot
-          $ either
-              LoadStatusFailure
-              (LoadStatusSuccess . SDLTexture)
-              e
+          =<< either
+                (return . LoadStatusFailure)
+                (fmap (LoadStatusSuccess . SDLTexture) . newSlot)
+                e
 
-    , textureSize = \(SDLTexture tex) -> do
-        info <- SDL.queryTexture tex
+    , textureSize = \(SDLTexture s) -> do
+        info <- SDL.queryTexture =<< readSlot s
         return
           $ fromIntegral
               <$> V2 (SDL.textureWidth info) (SDL.textureHeight info)
 
-    , withTexture = \(SDLTexture tex) m -> do
-        prev <-
-          SDL.get
-          $ SDL.rendererRenderTarget r
-        SDL.rendererRenderTarget r $= Just tex
+    , withTexture = \(SDLTexture s) m -> do
+        -- read the tex and get its size
+        tex <- readSlot s
+        size <-
+          fmap fromIntegral
+          . uncurry V2
+          . (SDL.textureWidth &&& SDL.textureHeight)
+          <$> SDL.queryTexture tex
+        -- make a texture to draw into
+        ttex <- SDL.createTexture r SDL.RGBA8888 SDL.TextureAccessTarget size
+        SDL.textureBlendMode ttex $= SDL.BlendAlphaBlend
+        -- then set that as the render target
+        prev <- SDL.get $ SDL.rendererRenderTarget r
+        SDL.rendererRenderTarget r $= Just ttex
+        -- draw the original texture into it
+        let source = rect2Rectangle $ Rect 0 size
+        SDL.copy r tex (Just source) (Just source)
+        -- do the rest of the drawing
         a <- m
+        -- destroy the old texture
+        SDL.destroyTexture tex
+        -- unbind the render target
         SDL.rendererRenderTarget r $= prev
+        -- update the input texture slot
+        writeSlot s ttex
         return a
 
-    -- TODO: Do a filesystem check to see if fonts exist before returning success
-    , font = \file -> newSlot (LoadStatusSuccess $ SDLFont file)
+    , font = \file -> liftIO (doesFileExist file) >>= newSlot . \case
+        True -> LoadStatusSuccess $ SDLFont file
+        False ->
+          LoadStatusFailure
+            $ unwords
+              [ show file
+              , "does not exist."
+              ]
     }
 
 

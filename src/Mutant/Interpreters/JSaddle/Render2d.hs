@@ -22,18 +22,17 @@ module Mutant.Interpreters.JSaddle.Render2d where
 import           Control.Lens                           ((^.))
 import           Control.Monad                          (void)
 import           Control.Monad.IO.Class                 (MonadIO (..))
-import           Data.Text                              (Text)
-import qualified Data.Text                              as T
-import           Language.Javascript.JSaddle            (Function, JSM, JSVal,
-                                                         MonadJSM, call, eval,
+--import           Data.Text                              (Text)
+import           Language.Javascript.JSaddle            (Function,
+                                                         JSException (..), JSM,
+                                                         JSVal, MonadJSM, catch,
                                                          fromJSValUnchecked,
-                                                         function, global, js,
-                                                         js0, js1, js2, js4,
-                                                         jsf, jsg, jss, liftJSM,
-                                                         toJSVal)
+                                                         fun, function, js, js0,
+                                                         js1, js2, js4, jsf,
+                                                         jsg, jss, liftJSM, new,
+                                                         toJSVal, valToText)
 import           Language.Javascript.JSaddle.WebSockets (jsaddleWithAppOr)
 import           Linear                                 (V2 (..), V4 (..))
-import           NeatInterpolation
 import           Network.Wai.Application.Static         (defaultWebAppSettings,
                                                          staticApp)
 import           Network.Wai.Handler.Warp               (run)
@@ -49,9 +48,13 @@ type JSCanvas = Canvas JSVal JSVal String
 type JSRender2d = Render2d 'Render2dJS
 
 
--- Everything is a JSVal!
 data instance Texture 'Render2dJS = JSTexture JSVal
-data instance Font 'Render2dJS = JSFont Text
+data instance Font 'Render2dJS = JSFont String
+
+
+catchAndPrint :: JSM () -> JSM ()
+catchAndPrint f =
+  void $ f `catch` \(JSException e) -> valToText e >>= liftIO . print
 
 
 getNewJSCanvas :: MonadJSM m => V2 Int -> String -> m JSCanvas
@@ -60,8 +63,8 @@ getNewJSCanvas (V2 w h) assetPrefix = liftJSM $ do
   cvs  <- doc ^. js1 "createElement" "canvas"
   void $ cvs ^. jss "width" w
   void $ cvs ^. jss "height" h
+  void $ cvs ^. jss "id" "the-mutant-root"
   ctx  <- cvs ^. js1 "getContext" "2d"
-  void $ ctx ^. jss "specialId" "root"
   return Canvas
          { canvasWindow = cvs
          , canvasCtx = ctx
@@ -89,45 +92,72 @@ toCSSColor (V4 r g b a) =
     ]
 
 
-initiateTexture :: JSVal -> JSVal -> JSVal -> Slot (LoadStatus (Texture 'Render2dJS)) -> JSM Function
+initiateTexture :: JSVal -> JSVal -> JSVal -> Slot (LoadStatus (Texture 'Render2dJS)) -> JSM ()
 initiateTexture cvs img tex tvar = do
+  s <- newSlot Nothing
+  let removeListeners = do
+        readSlot s >>= \case
+          Nothing -> return () -- absurd
+          Just (cb, errcb) -> do
+            void $ img ^. js2 "removeEventListener" "load" (cb :: Function)
+            void $ img ^. js2 "removeEventListener" "error" (errcb :: Function)
   zero <- toJSVal (0 :: Int)
-  rec cb <-
-         function $ \_ _ _ -> do
-           width <- img ^. js "naturalWidth"
-           height <- img ^. js "naturalHeight"
-           liftIO $ putStrLn "Image is loaded!"
-           w :: Int <- fromJSValUnchecked width
-           h :: Int <- fromJSValUnchecked height
-           void $ cvs ^. jss "width" w
-           void $ cvs ^. jss "height" h
-           let args = [zero, zero, width, height, zero, zero, width, height]
-           void $ tex ^. jsf "drawImage" (img : args)
-           void $ tex ^. jss "complete" True
-           writeSlot tvar
-             $ LoadStatusSuccess
-             $ JSTexture tex
-           void $ img ^. js2 "removeEventListener" "load" cb
-  return cb
+  cb <-
+    function $ \_ _ _ -> do
+      width <- img ^. js "naturalWidth"
+      height <- img ^. js "naturalHeight"
+      w :: Int <- fromJSValUnchecked width
+      h :: Int <- fromJSValUnchecked height
+      void $ cvs ^. jss "width" w
+      void $ cvs ^. jss "height" h
+      let args = [zero, zero, width, height, zero, zero, width, height]
+      void $ tex ^. jsf "drawImage" (img : args)
+      void $ tex ^. jss "complete" True
+      writeSlot tvar
+        $ LoadStatusSuccess
+        $ JSTexture tex
+      removeListeners
+  errcb <-
+    function $ \_ _ _ -> do
+      writeSlot tvar
+        $ LoadStatusFailure "could not load texture"
+      removeListeners
+  void $ img ^. js2 "addEventListener" "load" cb
+  void $ img ^. js2 "addEventListener" "error" errcb
 
 
-fontLoadingFunction :: Text -> Text -> Text
-fontLoadingFunction nam url =
-  [text|
-  async function(success) {
-      const font = new FontFace('${nam}', 'url($url)');
-      // wait for font to be loaded
-      await font.load();
-      // add font to document
-      document.fonts.add(font);
-      // call the callback
-      success(font);
-  }
-  |]
+
+awaitJS :: JSVal -> JSM ()
+awaitJS = undefined
+
+-- https://developer.mozilla.org/en-US/docs/Web/API/FontFace/FontFace
+initiateFont
+  :: Slot (LoadStatus (Font 'Render2dJS))
+  -> FilePath
+  -> String
+  -> JSM ()
+initiateFont fvar path fontName = do
+  ff <- jsg "FontFace"
+  fontFace <- new ff (fontName, "url(" ++ path ++ ")")
+  promise <- fontFace ^. js0 "load"
+  let onload = fun $ \_ _ _ -> do
+        doc <- jsg "document"
+        void $ doc ^. js "fonts" ^. js1 "add" fontFace
+        writeSlot
+          fvar
+          $ LoadStatusSuccess
+          $ JSFont fontName
+      onfail = fun $ \_ _ [err] -> do
+        msg <- fromJSValUnchecked =<< err ^. js "message"
+        writeSlot
+          fvar
+          $ LoadStatusFailure msg
+  void $ promise ^. js1 "then" onload
+  void $ promise ^. js1 "catch" onfail
 
 
-toCSSFontStr :: Text -> V2 Int -> String
-toCSSFontStr font (V2 w _) = T.unpack font ++ " " ++ show w ++ "px"
+toCSSFontStr :: String -> V2 Int -> String
+toCSSFontStr font (V2 w _) = unwords [show w ++ "px", font]
 
 
 renderer2dJSaddle
@@ -184,12 +214,10 @@ renderer2dJSaddle c = do
           args <- traverse toJSVal [sx,sy,sw,sh,dx,dy,dw,dh]
           void $ canvasCtx canvas ^. jsf "drawImage" (cvs : args)
 
-    , fillText = \(JSFont font) sz color (V2 x y) txt -> liftJSM $ do
+    , fillText = \(JSFont font) sz (V2 x y) txt -> liftJSM $ do
         let fontStr = toCSSFontStr font sz
-            cssClr = toCSSColor color
         canvas <- readSlot s
         void $ canvasCtx canvas ^. jss "font" fontStr
-        void $ canvasCtx canvas ^. jss "fillStyle" cssClr
         void $ canvasCtx canvas ^. jsf "fillText" [txt, show x, show y]
 
     , texture = \fp -> do
@@ -204,9 +232,7 @@ renderer2dJSaddle c = do
           void $ cvs ^. jss "width" (0 :: Int)
           void $ cvs ^. jss "height" (0 :: Int)
           tvar <- newSlot LoadStatusLoading
-          cb <- initiateTexture cvs img tex tvar
-          -- TODO: Also add a listener for texture error
-          void $ img ^. js2 "addEventListener" "load" cb
+          initiateTexture cvs img tex tvar
           img ^. jss "src" imgPath
           return tvar
 
@@ -227,21 +253,11 @@ renderer2dJSaddle c = do
 
     , font = \file -> liftJSM $ do
         fvar <- newSlot LoadStatusLoading
-
         n <- withSlot k succ
         canvas <- readSlot s
-        let url = T.pack $ canvasExtra canvas ++ file
-            nam = T.pack $ "font" ++ show n
-
-        -- TODO: Handle the case where JSM font loading fails
-        successCB <- function $ \_ _ _ ->
-          writeSlot fvar
-            $ LoadStatusSuccess
-            $ JSFont nam
-
-        loadFun <- eval $ fontLoadingFunction nam url
-        -- TODO: Clean up JSM font loading callbacks
-        void $ call loadFun global [successCB]
+        let url = canvasExtra canvas ++ file
+            nam = "font" ++ show n
+        initiateFont fvar url nam
         return fvar
     }
 

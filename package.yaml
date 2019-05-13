@@ -16,6 +16,7 @@ dependencies:
 - base >= 4.7 && < 5
 - containers
 - data-fix
+- directory
 - freetype2
 - jsaddle
 - jsaddle-warp
@@ -23,7 +24,6 @@ dependencies:
 - lens
 - linear
 - mtl
-- neat-interpolation
 - sdl2
 - text
 - transformers

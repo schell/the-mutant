@@ -116,14 +116,13 @@ data Render2d (i :: Render2dBackend) (m :: Type -> Type)
     -- should go. The texture will be stretched or squished to fit.
     -> m ()
 
-    -- | Draw some text
+    -- | Draw some text.
+    -- Uses the current draw color as the text color.
   , fillText
     :: Font i
     -- ^ The font to use
     -> V2 Int
     -- ^ The glyph size
-    -> V4 Int
-    -- ^ The text color
     -> V2 Int
     -- ^ The position of the first line of text.
     -> String
@@ -189,28 +188,33 @@ drawingStuff Render2d{..} = do
       br = V2 (w - 10) (h - 10)
       bl = V2 10 (h - 10)
       lns = [Line tl br, Line tr bl]
-      black = V4 174 174 174 255
+      grey = V4 174 174 174 255
+      black = V4 255 255 255 255
       white = V4 255 255 255 255
       cyan = V4 0 255 255 255
       canary = V4 255 255 0 255
+
   clear
-  -- first draw the screen black
-  setDrawColor black
+
+  -- first draw the screen grey
+  setDrawColor grey
   fillRect
     $ Rect 0 wh
+
   -- draw a white frame inset by 10 pixels
   setDrawColor white
   strokeRect
     $ insetRect (Rect 0 wh) 10
+
   -- then draw a cyan X
   setDrawColor cyan
   traverse_ strokeLine lns
-  -- load an image
+
+  -- load an image, get its size
   tex <- await =<< texture "sot.png"
-  -- loop until it's actually loaded, `textureLoad` is synchronous on sdl and
-  -- async in javascript
   tsz@(V2 _ th) <- textureSize tex
   liftIO $ putStrLn $ "Texture size is " ++ show tsz
+
   -- draw the texture to the screen
   let posf :: V2 Float
       posf = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
@@ -219,6 +223,7 @@ drawingStuff Render2d{..} = do
     tex
     (Rect 0 tsz)
     (Rect pos tsz)
+
   -- do some higher-order drawing into the texture itself
   withTexture tex $ do
     texDims <- getDimensions
@@ -231,17 +236,17 @@ drawingStuff Render2d{..} = do
     (Rect (pos + V2 0 th) tsz)
 
   -- play with fonts and text
+  setDrawColor black
   komika <- await =<< font "komika.ttf"
-
   fillText
     komika
     (V2 16 16)
-    (V4 255 255 255 255)
     (V2 100 100)
     "Here is some text..."
 
   -- present the window
   present
+
   -- loop so the window won't close
   fix $ \loop -> do
     liftIO $ threadDelay 1000000
