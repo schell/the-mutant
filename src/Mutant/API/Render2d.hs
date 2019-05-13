@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds       #-}
-{-# LANGUAGE LambdaCase       #-}
 {-# LANGUAGE KindSignatures  #-}
+{-# LANGUAGE LambdaCase      #-}
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies    #-}
@@ -13,12 +13,16 @@ import           Data.Function          (fix)
 import           Data.Kind              (Type)
 import           Linear                 (V2 (..), V4 (..))
 
+import           Mutant.Backend
 import           Mutant.Slot
 
 
+-- | A rectangle.
 data Rect a
   = Rect
-  { rectUpperLeft :: V2 a
+  { -- | Upper left
+    rectUpperLeft :: V2 a
+    -- | Width and height
   , rectExtents   :: V2 a
   }
 
@@ -35,9 +39,12 @@ insetRect r v =
   }
 
 
+-- | A line.
 data Line a
   = Line
-  { lineStart :: V2 a
+  { -- | Line start
+    lineStart :: V2 a
+    -- | Line end
   , lineEnd   :: V2 a
   }
 
@@ -70,17 +77,12 @@ await t =
     LoadStatusSuccess a -> return a
 
 
-data Render2dBackend
-  = Render2dJS
-  | Render2dSDL
+data family Texture (i :: Backend)
+data family Font (i :: Backend)
 
 
-data family Texture (i :: Render2dBackend)
-data family Font (i :: Render2dBackend)
-
-
-data Render2d (i :: Render2dBackend) (m :: Type -> Type)
-  = Render2d
+data Render2dAPI (i :: Backend) (m :: Type -> Type)
+  = Render2dAPI
   { -- | Clear the rendering context.
     clear :: m ()
 
@@ -165,10 +167,10 @@ data Canvas window ctx a
 
 testTextureSize
   :: MonadIO m
-  => Render2d i m
+  => Render2dAPI i m
   -> FilePath
   -> m Bool
-testTextureSize Render2d{..} fp = do
+testTextureSize Render2dAPI{..} fp = do
   tex <- await =<< texture fp
   tsz <- textureSize tex
   dim <- withTexture tex getDimensions
@@ -178,9 +180,9 @@ testTextureSize Render2d{..} fp = do
 -- | This is a test.
 drawingStuff
   :: MonadIO m
-  => Render2d i m
+  => Render2dAPI i m
   -> m ()
-drawingStuff Render2d{..} = do
+drawingStuff Render2dAPI{..} = do
   wh@(V2 w h) <- getDimensions
   liftIO $ putStrLn $ "Context has dimensions " ++ show wh
   let tl = 10

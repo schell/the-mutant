@@ -17,12 +17,11 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
-module Mutant.Interpreters.JSaddle.Render2d where
+module Mutant.Backends.JSaddle where
 
 import           Control.Lens                           ((^.))
 import           Control.Monad                          (void)
 import           Control.Monad.IO.Class                 (MonadIO (..))
---import           Data.Text                              (Text)
 import           Language.Javascript.JSaddle            (Function,
                                                          JSException (..), JSM,
                                                          JSVal, MonadJSM, catch,
@@ -39,17 +38,18 @@ import           Network.Wai.Handler.Warp               (run)
 import           Network.WebSockets.Connection          (defaultConnectionOptions)
 
 import           Mutant.API.Render2d
+import           Mutant.Backend
 import           Mutant.Slot
 
 
 type JSCanvas = Canvas JSVal JSVal String
 
 
-type JSRender2d = Render2d 'Render2dJS
+type JSRender2d = Render2dAPI 'BackendJS
 
 
-data instance Texture 'Render2dJS = JSTexture JSVal
-data instance Font 'Render2dJS = JSFont String
+data instance Texture 'BackendJS = JSTexture JSVal
+data instance Font 'BackendJS = JSFont String
 
 
 catchAndPrint :: JSM () -> JSM ()
@@ -92,7 +92,7 @@ toCSSColor (V4 r g b a) =
     ]
 
 
-initiateTexture :: JSVal -> JSVal -> JSVal -> Slot (LoadStatus (Texture 'Render2dJS)) -> JSM ()
+initiateTexture :: JSVal -> JSVal -> JSVal -> Slot (LoadStatus (Texture 'BackendJS)) -> JSM ()
 initiateTexture cvs img tex tvar = do
   s <- newSlot Nothing
   let removeListeners = do
@@ -126,13 +126,9 @@ initiateTexture cvs img tex tvar = do
   void $ img ^. js2 "addEventListener" "error" errcb
 
 
-
-awaitJS :: JSVal -> JSM ()
-awaitJS = undefined
-
 -- https://developer.mozilla.org/en-US/docs/Web/API/FontFace/FontFace
 initiateFont
-  :: Slot (LoadStatus (Font 'Render2dJS))
+  :: Slot (LoadStatus (Font 'BackendJS))
   -> FilePath
   -> String
   -> JSM ()
@@ -168,7 +164,7 @@ renderer2dJSaddle c = do
   s <- newSlot c
   k <- newSlot (0 :: Int)
   return
-    Render2d
+    Render2dAPI
     { clear = do
         canvas <- readSlot s
         V2 w h <- getDims canvas

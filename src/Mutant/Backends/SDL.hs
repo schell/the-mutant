@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
-module Mutant.Interpreters.SDL.Render2d where
+module Mutant.Backends.SDL where
 
 import           Codec.Picture          (convertRGBA8, imageData, imageHeight,
                                          imageWidth, readImage)
@@ -31,19 +31,21 @@ import qualified SDL
 import           System.Directory       (doesFileExist)
 import           Typograffiti.SDL       as Typo
 
+import           Mutant.API.Events
 import           Mutant.API.Render2d
+import           Mutant.Backend
 import           Mutant.Slot
-
 
 
 type SDLCanvas = Canvas Window Renderer String
 
 
-type SDLRender2d = Render2d 'Render2dSDL
+type SDLRender2dAPI = Render2dAPI 'BackendSDL
+type SDLEventsAPI = EventsAPI 'BackendSDL
 
 
-data instance Texture 'Render2dSDL = SDLTexture (Slot SDL.Texture)
-data instance Font 'Render2dSDL = SDLFont FilePath
+data instance Texture 'BackendSDL = SDLTexture (Slot SDL.Texture)
+data instance Font 'BackendSDL = SDLFont FilePath
 
 
 getNewCanvas
@@ -93,14 +95,11 @@ renders2dSDL
   :: forall m
    . MonadIO m
   => SDLCanvas
-  -> m (SDLRender2d m)
+  -> m (SDLRender2dAPI m)
 renders2dSDL canvas@(Canvas _ r pfx) = do
-  liftIO $ putStrLn "Creating the font store"
   fstore <- runOrFail $ Typo.newDefaultFontStore r
-  liftIO $ putStrLn "Created the font store"
-
   return
-    Render2d
+    Render2dAPI
     { clear = do
         SDL.clear r
         SDL.rendererDrawColor r $= V4 0 0 0 0
