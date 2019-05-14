@@ -3,17 +3,17 @@ This is a framework of game related APIs and backends.
 
 ## APIs
 
-[x] - [2d graphics](https://github.com/schell/the-mutant/blob/master/src/Mutant/API/Render2d.hs)
-[ ] - [input events](https://github.com/schell/the-mutant/blob/master/src/Mutant/API/Events.hs)
-[ ] - audio
-[ ] - 2d physics 
+- [x] [2d graphics](https://github.com/schell/the-mutant/blob/master/src/Mutant/API/Render2d.hs) 
+- [ ] [input events](https://github.com/schell/the-mutant/blob/master/src/Mutant/API/Events.hs) 
+- [ ] audio 
+- [ ] 2d physics  
 
 ## Backends
 
-[x] - desktop
-[x] - browser
-[ ] - iOS 
-[ ] - Android
+- [x] desktop
+- [x] browser
+- [ ] iOS 
+- [ ] Android
 
 ## Background
 *The Mutant* picks up where other projects like [gelatin][gelatin], [glucose][glucose] and
