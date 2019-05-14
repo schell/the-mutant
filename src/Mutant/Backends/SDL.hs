@@ -34,6 +34,7 @@ import           Typograffiti.SDL       as Typo
 import           Mutant.API.Events
 import           Mutant.API.Render2d
 import           Mutant.Backend
+import           Mutant.Geom
 import           Mutant.Slot
 
 
@@ -41,36 +42,33 @@ type SDLCanvas = Canvas Window Renderer String
 
 
 type SDLRender2dAPI = Render2dAPI 'BackendSDL
+
+
 type SDLEventsAPI = EventsAPI 'BackendSDL
 
 
 data instance Texture 'BackendSDL = SDLTexture (Slot SDL.Texture)
+
+
 data instance Font 'BackendSDL = SDLFont FilePath
 
 
-getNewCanvas
-  :: String
+data instance MutantInstance 'BackendSDL = SDLInstance Window
+
+
+getSDLInstance
+  :: MonadIO m
+  => String
   -- ^ Window title
   -> V2 Int
-  -- ^ Window size
-  -> String
-  -- ^ Asset prefix
-  -> IO SDLCanvas
-getNewCanvas title size pfx = do
+  -- ^ Window Size
+  -> m (MutantInstance 'BackendSDL)
+getSDLInstance title size = do
+  SDL.initialize $ Just SDL.InitVideo
   let wcfg = SDL.defaultWindow
          { SDL.windowInitialSize = fromIntegral <$> size }
-      rcfg = SDL.defaultRenderer
-         { SDL.rendererType = SDL.AcceleratedVSyncRenderer }
-  w :: Window <- SDL.createWindow (T.pack title) wcfg
-  Canvas w
-    <$> SDL.createRenderer w (-1) rcfg
-    <*> pure pfx
-
-
-getDims :: SDLCanvas -> IO (V2 Int)
-getDims canvas =
-  fmap fromIntegral
-    <$> SDL.glGetDrawableSize (canvasWindow canvas)
+  SDLInstance
+    <$> SDL.createWindow (T.pack title) wcfg
 
 
 rect2Rectangle
@@ -91,12 +89,17 @@ runOrFail
 runOrFail f = runExceptT f >>= either fail return
 
 
-renders2dSDL
+getSDLRender2dAPI
   :: forall m
    . MonadIO m
-  => SDLCanvas
+  => MutantInstance 'BackendSDL
+  -- ^ The mutant instance. See getSDLInstance.
+  -> String
   -> m (SDLRender2dAPI m)
-renders2dSDL canvas@(Canvas _ r pfx) = do
+getSDLRender2dAPI (SDLInstance win) pfx = do
+  let rcfg = SDL.defaultRenderer
+               { SDL.rendererType = SDL.AcceleratedVSyncRenderer }
+  r <- SDL.createRenderer win (-1) rcfg
   fstore <- runOrFail $ Typo.newDefaultFontStore r
   return
     Render2dAPI
@@ -105,7 +108,9 @@ renders2dSDL canvas@(Canvas _ r pfx) = do
         SDL.rendererDrawColor r $= V4 0 0 0 0
         SDL.fillRect r Nothing
     , present = SDL.present r
-    , getDimensions = liftIO $ getDims canvas
+    , getDimensions =
+        fmap fromIntegral
+          <$> SDL.glGetDrawableSize win
     , setDrawColor = \c ->
         SDL.rendererDrawColor r $= (fromIntegral <$> c)
     , strokeLine = \(Line start end) -> do
@@ -192,7 +197,7 @@ renders2dSDL canvas@(Canvas _ r pfx) = do
         writeSlot s ttex
         return a
 
-    , font = \file -> liftIO (doesFileExist file) >>= newSlot . \case
+    , font = \file -> liftIO (doesFileExist (pfx ++ file)) >>= newSlot . \case
         True -> LoadStatusSuccess $ SDLFont file
         False ->
           LoadStatusFailure
@@ -205,5 +210,6 @@ renders2dSDL canvas@(Canvas _ r pfx) = do
 
 renders2dTest :: IO ()
 renders2dTest = do
-  canvas <- getNewCanvas "SDL Render2d Test" (V2 640 480) "assets/"
-  drawingStuff =<< renders2dSDL canvas
+  i <- getSDLInstance "SDL Render2d Test" (V2 640 480)
+  r <- getSDLRender2dAPI i "assets/"
+  drawingStuff r

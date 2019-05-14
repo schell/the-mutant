@@ -1,14 +1,16 @@
 {-# LANGUAGE DataKinds      #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes     #-}
 module Mutant.API.Events where
 
-import           Data.Int       (Int32)
-import           Data.Kind      (Type)
-import           Data.Text      (Text)
-import           Data.Word      (Word32, Word64)
-import           Linear         (V2)
+import           Data.Kind            (Type)
+import           Data.Text            (Text)
+import           Data.Word            (Word32)
+import           Linear               (V2)
 
-import           Mutant.Backend
+import           Mutant.Backend       (Backend (..))
+import           Mutant.Geom          (Rect)
+import           Mutant.KeyboardCodes (Keycode, Scancode)
 
 
 -- | Buttons on a mouse.
@@ -52,6 +54,7 @@ data MouseButtonEvent
   } deriving (Show, Eq)
 
 
+-- | Represents the state of all modifier keys.
 data KeyModifier
   = KeyModifier
   { keyModifierLeftShift  :: Bool
@@ -70,8 +73,8 @@ data KeyModifier
 
 data Keysym
   = Keysym
-  { keysymScancode :: Word32
-  , keysymKeycode  :: Int32
+  { keysymScancode :: Scancode
+  , keysymKeycode  :: Keycode
   , keysymModifier :: KeyModifier
   } deriving (Show, Eq)
 
@@ -101,8 +104,9 @@ data EventPayload
 
 data Event
   = Event
-  { -- | Monotonic event time in nanoseconds since some unspecified starting point.
-    eventTime    :: Word64
+  { -- | Monotonic event time in milliseconds since some unspecified starting
+    -- point.
+    eventTime    :: Word32
     -- | The event payload.
   , eventPayload :: EventPayload
   }
@@ -110,9 +114,16 @@ data Event
 
 data EventsAPI (i :: Backend) (m :: Type -> Type)
   = EventsAPI
-  { -- | Get all pending events. Never blocks - if no events are in the queue,
+  { -- | Get all pending events. Never blocks - if no events are in the queue
     -- @[]@ is returned.
-    pollEvents :: m [Event]
-    -- | Block for a specific number of milliseconds waiting for an event.
-  , waitEvent  :: Int -> m (Maybe Event)
+    pollEvents     :: m [Event]
+    -- | Block for a specific number of milliseconds waiting for an event or
+    -- timeout returning @Nothing@.
+  , waitEvent      :: Int -> m (Maybe Event)
+    -- | Inject an event into the event queue. Useful for testing or replays.
+  , injectEvent    :: Event -> m ()
+    -- | Begin sending text input events from the given rectangle.
+  , beginTextInput :: forall a. Rect a -> m ()
+    -- | End sending text input events.
+  , endTextInput   :: m ()
   }

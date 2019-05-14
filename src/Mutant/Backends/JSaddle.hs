@@ -39,6 +39,7 @@ import           Network.WebSockets.Connection          (defaultConnectionOption
 
 import           Mutant.API.Render2d
 import           Mutant.Backend
+import           Mutant.Geom
 import           Mutant.Slot
 
 

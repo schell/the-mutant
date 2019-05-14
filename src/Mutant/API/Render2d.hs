@@ -13,40 +13,9 @@ import           Data.Function          (fix)
 import           Data.Kind              (Type)
 import           Linear                 (V2 (..), V4 (..))
 
-import           Mutant.Backend
-import           Mutant.Slot
-
-
--- | A rectangle.
-data Rect a
-  = Rect
-  { -- | Upper left
-    rectUpperLeft :: V2 a
-    -- | Width and height
-  , rectExtents   :: V2 a
-  }
-
-
-insetRect
-  :: Num a
-  => Rect a
-  -> V2 a
-  -> Rect a
-insetRect r v =
-  Rect
-  { rectUpperLeft = rectUpperLeft r + v
-  , rectExtents = rectExtents r - 2 * v
-  }
-
-
--- | A line.
-data Line a
-  = Line
-  { -- | Line start
-    lineStart :: V2 a
-    -- | Line end
-  , lineEnd   :: V2 a
-  }
+import           Mutant.Backend         (Backend (..))
+import           Mutant.Geom            (Line (..), Rect (..), insetRect)
+import           Mutant.Slot            (Slot, readSlot)
 
 
 data LoadStatus a
@@ -77,7 +46,11 @@ await t =
     LoadStatusSuccess a -> return a
 
 
+-- | Represents a texture maintained by the target backend.
 data family Texture (i :: Backend)
+
+
+-- | Represents a font maintained by the target backend.
 data family Font (i :: Backend)
 
 
@@ -156,7 +129,7 @@ data Render2dAPI (i :: Backend) (m :: Type -> Type)
       -> m (Slot (LoadStatus (Font i)))
   }
 
--- | Helps with writing interpreters.
+-- | Helps with writing backends.
 data Canvas window ctx a
   = Canvas
   { canvasWindow :: window
@@ -249,7 +222,7 @@ drawingStuff Render2dAPI{..} = do
   -- present the window
   present
 
-  -- loop so the window won't close
+  -- loop so the window won't close on desktop
   fix $ \loop -> do
     liftIO $ threadDelay 1000000
     loop
