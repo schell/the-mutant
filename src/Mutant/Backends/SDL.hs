@@ -14,7 +14,11 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
-module Mutant.Backends.SDL where
+module Mutant.Backends.SDL
+  ( getSDLInstance
+  , getSDLRender2dAPI
+  , renders2dTest
+  ) where
 
 import           Codec.Picture          (convertRGBA8, imageData, imageHeight,
                                          imageWidth, readImage)
@@ -25,26 +29,17 @@ import qualified Data.Text              as T
 import           Data.Traversable       (for)
 import           Data.Vector.Storable   (thaw)
 import           Linear                 (V2 (..), V4 (..))
-import           SDL                    (Point (..), Rectangle (..), Renderer,
-                                         Window, ($=))
+import           SDL                    (Point (..), Rectangle (..), Window,
+                                         ($=))
 import qualified SDL
 import           System.Directory       (doesFileExist)
 import           Typograffiti.SDL       as Typo
 
-import           Mutant.API.Events
+--import           Mutant.API.Events
 import           Mutant.API.Render2d
 import           Mutant.Backend
 import           Mutant.Geom
 import           Mutant.Slot
-
-
-type SDLCanvas = Canvas Window Renderer String
-
-
-type SDLRender2dAPI = Render2dAPI 'BackendSDL
-
-
-type SDLEventsAPI = EventsAPI 'BackendSDL
 
 
 data instance Texture 'BackendSDL = SDLTexture (Slot SDL.Texture)
@@ -95,7 +90,7 @@ getSDLRender2dAPI
   => MutantInstance 'BackendSDL
   -- ^ The mutant instance. See getSDLInstance.
   -> String
-  -> m (SDLRender2dAPI m)
+  -> m (Render2dAPI 'BackendSDL m)
 getSDLRender2dAPI (SDLInstance win) pfx = do
   let rcfg = SDL.defaultRenderer
                { SDL.rendererType = SDL.AcceleratedVSyncRenderer }

@@ -17,7 +17,11 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
-module Mutant.Backends.JSaddle where
+module Mutant.Backends.JSaddle
+  ( getJSInstance
+  , getJSRender2dAPI
+  , renders2dTest
+  ) where
 
 import           Control.Lens                           ((^.))
 import           Control.Monad                          (void)
@@ -43,22 +47,29 @@ import           Mutant.Geom
 import           Mutant.Slot
 
 
-type JSCanvas = Canvas JSVal JSVal String
-
-
-type JSRender2d = Render2dAPI 'BackendJS
+data Canvas
+  = Canvas
+  { canvasWindow       :: JSVal
+  , canvasCtx          :: JSVal
+  , canvasAssetPrefix  :: String
+  }
 
 
 data instance Texture 'BackendJS = JSTexture JSVal
+
+
 data instance Font 'BackendJS = JSFont String
 
 
-catchAndPrint :: JSM () -> JSM ()
-catchAndPrint f =
+data instance MutantInstance 'BackendJS = JSInstance Canvas
+
+
+_catchAndPrint :: JSM () -> JSM ()
+_catchAndPrint f =
   void $ f `catch` \(JSException e) -> valToText e >>= liftIO . print
 
 
-getNewJSCanvas :: MonadJSM m => V2 Int -> String -> m JSCanvas
+getNewJSCanvas :: MonadJSM m => V2 Int -> String -> m Canvas
 getNewJSCanvas (V2 w h) assetPrefix = liftJSM $ do
   doc  <- jsg "document"
   cvs  <- doc ^. js1 "createElement" "canvas"
@@ -69,11 +80,11 @@ getNewJSCanvas (V2 w h) assetPrefix = liftJSM $ do
   return Canvas
          { canvasWindow = cvs
          , canvasCtx = ctx
-         , canvasExtra = assetPrefix
+         , canvasAssetPrefix = assetPrefix
          }
 
 
-getDims :: MonadJSM m => JSCanvas -> m (V2 Int)
+getDims :: MonadJSM m => Canvas -> m (V2 Int)
 getDims canvas = liftJSM $ do
   w <- canvasWindow canvas ^. js "width"
   h <- canvasWindow canvas ^. js "height"
@@ -157,11 +168,11 @@ toCSSFontStr :: String -> V2 Int -> String
 toCSSFontStr font (V2 w _) = unwords [show w ++ "px", font]
 
 
-renderer2dJSaddle
+getJSRender2dAPI
   :: MonadJSM m
-  => JSCanvas
-  -> m (JSRender2d m)
-renderer2dJSaddle c = do
+  => MutantInstance 'BackendJS
+  -> m (Render2dAPI 'BackendJS m)
+getJSRender2dAPI (JSInstance c) = do
   s <- newSlot c
   k <- newSlot (0 :: Int)
   return
@@ -220,7 +231,7 @@ renderer2dJSaddle c = do
     , texture = \fp -> do
         canvas <- readSlot s
         liftJSM $ do
-          let imgPath = canvasExtra canvas ++ fp
+          let imgPath = canvasAssetPrefix canvas ++ fp
           doc <- jsg "document"
           img <- doc ^. js1 "createElement" "img"
           cvs <- doc ^. js1 "createElement" "canvas"
@@ -242,7 +253,7 @@ renderer2dJSaddle c = do
     , withTexture = \(JSTexture tex) m -> do
         canvas <- readSlot s
         cvs <- liftJSM $ tex ^. js "canvas"
-        let newCanvas = Canvas cvs tex (canvasExtra canvas)
+        let newCanvas = Canvas cvs tex (canvasAssetPrefix canvas)
         writeSlot s newCanvas
         a <- m
         writeSlot s canvas
@@ -252,21 +263,20 @@ renderer2dJSaddle c = do
         fvar <- newSlot LoadStatusLoading
         n <- withSlot k succ
         canvas <- readSlot s
-        let url = canvasExtra canvas ++ file
+        let url = canvasAssetPrefix canvas ++ file
             nam = "font" ++ show n
         initiateFont fvar url nam
         return fvar
     }
 
 
-myApp :: JSM ()
-myApp = do
-  cvs <- getNewJSCanvas (V2 640 480) "http://localhost:8888/"
+getJSInstance :: V2 Int -> JSM (MutantInstance 'BackendJS)
+getJSInstance sz = do
+  cvs <- getNewJSCanvas sz "http://localhost:8888/"
   doc <- jsg "document"
   bdy <- doc ^. js "body"
   void $ bdy ^. js1 "appendChild" (canvasWindow cvs)
-  renders2d <- renderer2dJSaddle cvs
-  drawingStuff renders2d
+  return $ JSInstance cvs
 
 
 renders2dTest :: IO ()
@@ -277,3 +287,8 @@ renders2dTest = do
       $ staticApp
       $ defaultWebAppSettings "assets/"
   run 8888 app
+  where
+    myApp = do
+      i <- getJSInstance (V2 640 480)
+      r <- getJSRender2dAPI i
+      drawingStuff r

@@ -129,14 +129,6 @@ data Render2dAPI (i :: Backend) (m :: Type -> Type)
       -> m (Slot (LoadStatus (Font i)))
   }
 
--- | Helps with writing backends.
-data Canvas window ctx a
-  = Canvas
-  { canvasWindow :: window
-  , canvasCtx    :: ctx
-  , canvasExtra  :: a
-  }
-
 
 testTextureSize
   :: MonadIO m
