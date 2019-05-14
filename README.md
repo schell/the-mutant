@@ -11,7 +11,9 @@ This is a framework of game related APIs and backends for aspiring Haskell game 
 
 ## Backends
 
-- [x] desktop
+- [x] Linux
+- [x] macOS
+- [x] Windows
 - [x] browser
 - [ ] iOS 
 - [ ] Android
