@@ -1,5 +1,5 @@
 # The Mutant
-This is a framework of game related APIs and backends. 
+This is a framework of game related APIs and backends for aspiring Haskell game enthusiasts.  
 
 ## APIs
 
@@ -7,6 +7,7 @@ This is a framework of game related APIs and backends.
 - [ ] [input events](https://github.com/schell/the-mutant/blob/master/src/Mutant/API/Events.hs) 
 - [ ] audio 
 - [ ] 2d physics  
+- [ ] 3d gles graphics
 
 ## Backends
 
@@ -22,8 +23,12 @@ those failed projects and get them up and running again in a slightly new contex
 The point of it all is to be able to quickly write portable video games and multimedia 
 applications in Haskell.
 
-The Mutant gets its name from its unapologetic use of in-place mutation, which
-many Haskell devs fear. Don't fear The Mutant. Similarly, it "mutates" your game onto a 
+*The Mutant* gets its name from its unapologetic use of in-place mutation, which
+many Haskell devs fear. 
+
+Don't fear The Mutant. 
+
+Similarly, it "mutates" your game onto a 
 number of target platforms - the name is a double entendre. It also lends itself to cool 
 icons.
 
