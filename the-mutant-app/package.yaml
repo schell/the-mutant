@@ -1,0 +1,33 @@
+name:                the-mutant-app
+version:             0.1.0.0
+github:              "schell/the-mutant-app"
+license:             BSD3
+author:              "Schell Scivally"
+maintainer:          "efsubenevex@gmail.com"
+copyright:           "2019 Schell Scivally"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/schell/the-mutant/the-mutant-app#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- the-mutant
+- mtl
+- linear
+
+ghc-options:
+- -Wall
+- -Werror
+
+library:
+  source-dirs: src

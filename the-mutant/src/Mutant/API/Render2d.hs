@@ -6,15 +6,13 @@
 {-# LANGUAGE TypeFamilies    #-}
 module Mutant.API.Render2d where
 
-import           Control.Concurrent     (threadDelay)
 import           Control.Monad.IO.Class (MonadIO (..))
-import           Data.Foldable          (traverse_)
 import           Data.Function          (fix)
 import           Data.Kind              (Type)
 import           Linear                 (V2 (..), V4 (..))
 
 import           Mutant.Backend         (Backend (..))
-import           Mutant.Geom            (Line (..), Rect (..), insetRect)
+import           Mutant.Geom            (Line (..), Rect (..))
 import           Mutant.Slot            (Slot, readSlot)
 
 
@@ -94,15 +92,25 @@ data Render2dAPI (i :: Backend) (m :: Type -> Type)
     -- | Draw some text.
     -- Uses the current draw color as the text color.
   , fillText
-    :: Font i
-    -- ^ The font to use
-    -> V2 Int
-    -- ^ The glyph size
-    -> V2 Int
-    -- ^ The position of the first line of text.
-    -> String
-    -- ^ The text to draw
-    -> m ()
+      :: Font i
+      -- ^ The font to use
+      -> V2 Int
+      -- ^ The glyph size
+      -> V2 Int
+      -- ^ The position of the first line of text.
+      -> String
+      -- ^ The text to draw
+      -> m ()
+
+    -- | Measure the size of the text.
+  , measureText
+      :: Font i
+      -- ^ The font
+      -> V2 Int
+      -- ^ The glyph size
+      -> String
+      -- ^ The string to measure
+      -> m (V2 Int)
 
     -- | Load a texture
   , texture
@@ -114,20 +122,36 @@ data Render2dAPI (i :: Backend) (m :: Type -> Type)
       :: Texture i
       -> m (V2 Int)
 
-    -- | Perform a series of rendering commands into the given texture.
-  , withTexture
-      :: forall a
-       . Texture i
-      -- ^ The texture to draw into
-      -> m a
-      -- ^ The draw calls to draw into the texture
-      -> m a
+    -- | Bind a texture as the rendering target or reset the target to the main
+    -- drawing context.
+  , setRenderTarget
+      :: Maybe (Texture i)
+      -- ^ The texture to draw into or @Nothing@ to reset to the main drawing
+      -- context.
+      -> m ()
 
     -- | Load a new font face.
   , font
       :: FilePath
       -> m (Slot (LoadStatus (Font i)))
+
   }
+
+
+-- | Perform a series of rendering commands into the given texture.
+withTexture
+  :: Monad m
+  => Render2dAPI i m
+  -> Texture i
+  -- ^ The texture to draw into
+  -> m a
+  -- ^ The draw calls to draw into the texture
+  -> m a
+withTexture Render2dAPI{..} t ma = do
+  setRenderTarget $ Just t
+  a <- ma
+  setRenderTarget Nothing
+  return a
 
 
 testTextureSize
@@ -135,86 +159,44 @@ testTextureSize
   => Render2dAPI i m
   -> FilePath
   -> m Bool
-testTextureSize Render2dAPI{..} fp = do
+testTextureSize r@Render2dAPI{..} fp = do
   tex <- await =<< texture fp
   tsz <- textureSize tex
-  dim <- withTexture tex getDimensions
+  dim <- withTexture r tex getDimensions
   return $ tsz == dim
 
 
--- | This is a test.
-drawingStuff
-  :: MonadIO m
-  => Render2dAPI i m
-  -> m ()
-drawingStuff Render2dAPI{..} = do
-  wh@(V2 w h) <- getDimensions
-  liftIO $ putStrLn $ "Context has dimensions " ++ show wh
-  let tl = 10
-      tr = V2 (w - 10) 10
-      br = V2 (w - 10) (h - 10)
-      bl = V2 10 (h - 10)
-      lns = [Line tl br, Line tr bl]
-      grey = V4 174 174 174 255
-      black = V4 255 255 255 255
-      white = V4 255 255 255 255
-      cyan = V4 0 255 255 255
-      canary = V4 255 255 0 255
+raiseRender2d
+  :: Render2dAPI i m
+  -- ^ the API
+  -> (forall a. m a -> t m a)
+  -- ^ A function for raising API computations. ie (ReaderT . const)
+  -> Render2dAPI i (t m)
+raiseRender2d r f =
+  Render2dAPI
+  { clear = f $ clear r
+  , present = f $ present r
+  , getDimensions = f $ getDimensions r
+  , setDrawColor = f . setDrawColor r
+  , strokeLine = f . strokeLine r
+  , strokeRect = f . strokeRect r
+  , fillRect = f . fillRect r
+  , fillTexture = \t s d -> f $ fillTexture r t s d
+  , fillText = \fnt sz p str -> f $ fillText r fnt sz p str
+  , measureText = \fnt sz str -> f $ measureText r fnt sz str
+  , texture = f . texture r
+  , textureSize = f . textureSize r
+  , setRenderTarget = f . setRenderTarget r
+  , font = f . font r
+  }
 
-  clear
 
-  -- first draw the screen grey
-  setDrawColor grey
-  fillRect
-    $ Rect 0 wh
-
-  -- draw a white frame inset by 10 pixels
-  setDrawColor white
-  strokeRect
-    $ insetRect (Rect 0 wh) 10
-
-  -- then draw a cyan X
-  setDrawColor cyan
-  traverse_ strokeLine lns
-
-  -- load an image, get its size
-  tex <- await =<< texture "sot.png"
-  tsz@(V2 _ th) <- textureSize tex
-  liftIO $ putStrLn $ "Texture size is " ++ show tsz
-
-  -- draw the texture to the screen
-  let posf :: V2 Float
-      posf = (fromIntegral <$> wh)/2.0 - (fromIntegral <$> tsz)/2.0
-      pos = floor <$> posf
-  fillTexture
-    tex
-    (Rect 0 tsz)
-    (Rect pos tsz)
-
-  -- do some higher-order drawing into the texture itself
-  withTexture tex $ do
-    texDims <- getDimensions
-    liftIO $ putStrLn $ "textures dimensions are:" ++ show texDims
-    setDrawColor canary
-    fillRect (Rect 0 25)
-  fillTexture
-    tex
-    (Rect 0 tsz)
-    (Rect (pos + V2 0 th) tsz)
-
-  -- play with fonts and text
-  setDrawColor black
-  komika <- await =<< font "komika.ttf"
-  fillText
-    komika
-    (V2 16 16)
-    (V2 100 100)
-    "Here is some text..."
-
-  -- present the window
-  present
-
-  -- loop so the window won't close on desktop
-  fix $ \loop -> do
-    liftIO $ threadDelay 1000000
-    loop
+data AnimationFrameAPI (i :: Backend) (m :: Type -> Type)
+  = AnimationFrameAPI
+  { -- | Request that a computation be called next frame.
+    -- You should call this method whenever you're ready to update your animation
+    -- on screen. This ensures smooth animation on all target platforms.
+    requestAnimation
+      :: m ()
+      -> m ()
+  }

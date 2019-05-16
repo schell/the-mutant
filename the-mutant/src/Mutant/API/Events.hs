@@ -1,6 +1,7 @@
-{-# LANGUAGE DataKinds      #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE RankNTypes     #-}
+{-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE KindSignatures  #-}
+{-# LANGUAGE RankNTypes      #-}
+{-# LANGUAGE RecordWildCards #-}
 module Mutant.API.Events where
 
 import           Data.Kind            (Type)
@@ -93,6 +94,8 @@ newtype TextEvent
   deriving (Show, Eq)
 
 
+-- | Any user events.
+-- TODO: Expand the user events.
 data EventPayload
   = EventMouseMotion !MouseMotionEvent
   | EventMouseButton !MouseButtonEvent
@@ -116,14 +119,14 @@ data EventsAPI (i :: Backend) (m :: Type -> Type)
   = EventsAPI
   { -- | Get all pending events. Never blocks - if no events are in the queue
     -- @[]@ is returned.
-    pollEvents     :: m [Event]
-    -- | Block for a specific number of milliseconds waiting for an event or
+    pollEvents
+      :: m [Event]
+  -- | Block for a specific number of milliseconds waiting for an event or
     -- timeout returning @Nothing@.
-  , waitEvent      :: Int -> m (Maybe Event)
-    -- | Inject an event into the event queue. Useful for testing or replays.
-  , injectEvent    :: Event -> m ()
-    -- | Begin sending text input events from the given rectangle.
-  , beginTextInput :: forall a. Rect a -> m ()
+  , waitEvent :: Int -> m (Maybe Event)
+    -- | Begin sending text input events. Sets the rectangle used to display
+    -- international users text selections.
+  , beginTextInput :: Rect Int -> m ()
     -- | End sending text input events.
   , endTextInput   :: m ()
   }

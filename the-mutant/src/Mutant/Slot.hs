@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes     #-}
 module Mutant.Slot where
 
+import           Control.Arrow          ((&&&))
 import           Control.Monad.IO.Class (MonadIO (..))
 import           GHC.Conc               (TVar, atomically, newTVar, readTVar,
                                          writeTVar)
@@ -22,13 +23,24 @@ newSlot a =
     <$> liftIO (atomically $ newTVar a)
 
 
-withSlot
-  :: MonadIO m => Slot a -> (a -> a) -> m a
-withSlot (Slot s) f = liftIO $ atomically $ do
+stateSlot
+  :: MonadIO m
+  => Slot s
+  -> (s -> (a, s))
+  -> m a
+stateSlot (Slot s) f = liftIO $ atomically $ do
   x <- readTVar s
-  let x1 = f x
+  let (a, x1) = f x
   writeTVar s x1
-  return x1
+  return a
+
+
+withSlot
+  :: MonadIO m
+  => Slot a
+  -> (a -> a)
+  -> m a
+withSlot s f = stateSlot s (f &&& f)
 
 
 readSlot :: MonadIO m => Slot a -> m a
@@ -36,4 +48,4 @@ readSlot = liftIO . atomically . readTVar . unSlot
 
 
 writeSlot :: MonadIO m => Slot a -> a -> m ()
-writeSlot s a = withSlot s (const a) >> return ()
+writeSlot s a = stateSlot s $ const ((), a)

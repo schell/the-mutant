@@ -15,41 +15,17 @@ description:         Please see the README on GitHub at <https://github.com/sche
 dependencies:
 - base >= 4.7 && < 5
 - containers
-- data-fix
-- directory
-- freetype2
-- jsaddle
-- jsaddle-warp
-- JuicyPixels
-- lens
 - linear
 - mtl
-- sdl2
 - text
 - transformers
-- typograffiti-sdl
 - vector
-- wai-app-static
-- warp
-- websockets
 
 library:
   source-dirs: src
   ghc-options:
   - -Wall
-
-executables:
-  render2d-exe:
-    main:                Main.hs
-    source-dirs:         app/Renders2d
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - async
-    - the-mutant
-
+  - -Werror
 
 tests:
   free-gui-test:

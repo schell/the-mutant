@@ -11,7 +11,7 @@ data Rect a
     rectUpperLeft :: V2 a
     -- | Width and height
   , rectExtents   :: V2 a
-  }
+  } deriving (Show, Eq)
 
 
 -- | Inset a rectangle by some amount in x and y.
@@ -25,6 +25,18 @@ insetRect r v =
   { rectUpperLeft = rectUpperLeft r + v
   , rectExtents = rectExtents r - 2 * v
   }
+
+
+-- | Results in True if the Rect contains the given point.
+rectContainsPoint
+  :: (Num a, Ord a)
+  => Rect a
+  -> V2 a
+  -> Bool
+rectContainsPoint r (V2 px py) =
+  let V2 minx miny = rectUpperLeft r
+      V2 maxx maxy = rectUpperLeft r + rectExtents r
+  in (px >= minx && px <= maxx) && (py >= miny && py <= maxy)
 
 
 -- | A line.

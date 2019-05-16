@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes   #-}
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveFunctor         #-}
@@ -20,19 +21,30 @@
 module Mutant.Backends.JSaddle
   ( getJSInstance
   , getJSRender2dAPI
-  , renders2dTest
+  , getJSEventsAPI
+  , getJSAnimationFrameAPI
+  , runJS
   ) where
 
+import           Control.Concurrent                     (threadDelay)
+import           Control.Concurrent.Async               (async, race_)
+import           Control.Concurrent.MVar                (MVar, newEmptyMVar,
+                                                         putMVar, takeMVar,
+                                                         tryTakeMVar)
 import           Control.Lens                           ((^.))
 import           Control.Monad                          (void)
 import           Control.Monad.IO.Class                 (MonadIO (..))
+import           GHC.Clock                              (getMonotonicTime)
 import           Language.Javascript.JSaddle            (Function,
                                                          JSException (..), JSM,
-                                                         JSVal, MonadJSM, catch,
+                                                         JSVal, MonadJSM,
+                                                         askJSM, catch,
                                                          fromJSValUnchecked,
                                                          fun, function, js, js0,
-                                                         js1, js2, js4, jsf,
-                                                         jsg, jss, liftJSM, new,
+                                                         js1, js2, js3, js4,
+                                                         jsf, jsg, jss, liftJSM,
+                                                         new,
+                                                         nextAnimationFrame,
                                                          toJSVal, valToText)
 import           Language.Javascript.JSaddle.WebSockets (jsaddleWithAppOr)
 import           Linear                                 (V2 (..), V4 (..))
@@ -41,6 +53,7 @@ import           Network.Wai.Application.Static         (defaultWebAppSettings,
 import           Network.Wai.Handler.Warp               (run)
 import           Network.WebSockets.Connection          (defaultConnectionOptions)
 
+import           Mutant.API.Events
 import           Mutant.API.Render2d
 import           Mutant.Backend
 import           Mutant.Geom
@@ -49,9 +62,9 @@ import           Mutant.Slot
 
 data Canvas
   = Canvas
-  { canvasWindow       :: JSVal
-  , canvasCtx          :: JSVal
-  , canvasAssetPrefix  :: String
+  { canvasWindow      :: JSVal
+  , canvasCtx         :: JSVal
+  , canvasAssetPrefix :: String
   }
 
 
@@ -174,6 +187,7 @@ getJSRender2dAPI
   -> m (Render2dAPI 'BackendJS m)
 getJSRender2dAPI (JSInstance c) = do
   s <- newSlot c
+
   k <- newSlot (0 :: Int)
   return
     Render2dAPI
@@ -228,6 +242,16 @@ getJSRender2dAPI (JSInstance c) = do
         void $ canvasCtx canvas ^. jss "font" fontStr
         void $ canvasCtx canvas ^. jsf "fillText" [txt, show x, show y]
 
+    , measureText = \(JSFont font) sz@(V2 _ h) str -> liftJSM $ do
+        let fontStr = toCSSFontStr font sz
+        canvas <- readSlot s
+        void $ canvasCtx canvas ^. jss "font" fontStr
+        metrics <- canvasCtx canvas ^. js1 "measureText" str
+        width <- fromJSValUnchecked =<< metrics ^. js "width"
+        return
+          $ V2 width
+          $ h * length (lines str)
+
     , texture = \fp -> do
         canvas <- readSlot s
         liftJSM $ do
@@ -250,14 +274,13 @@ getJSRender2dAPI (JSInstance c) = do
           V2 <$> (cvs ^. js "width" >>= fromJSValUnchecked)
              <*> (cvs ^. js "height" >>= fromJSValUnchecked)
 
-    , withTexture = \(JSTexture tex) m -> do
-        canvas <- readSlot s
-        cvs <- liftJSM $ tex ^. js "canvas"
-        let newCanvas = Canvas cvs tex (canvasAssetPrefix canvas)
-        writeSlot s newCanvas
-        a <- m
-        writeSlot s canvas
-        return a
+    , setRenderTarget = \case
+        Nothing -> writeSlot s c
+        Just (JSTexture tex) -> do
+          canvas <- readSlot s
+          cvs <- liftJSM $ tex ^. js "canvas"
+          let newCanvas = Canvas cvs tex (canvasAssetPrefix canvas)
+          writeSlot s newCanvas
 
     , font = \file -> liftJSM $ do
         fvar <- newSlot LoadStatusLoading
@@ -279,16 +302,147 @@ getJSInstance sz = do
   return $ JSInstance cvs
 
 
-renders2dTest :: IO ()
-renders2dTest = do
-  putStrLn "running at http://localhost:8888"
+data EventState
+  = EventState
+  { eventStateMousePos :: V2 Int
+  } deriving (Show)
+
+
+emptyEventState :: EventState
+emptyEventState =
+  EventState
+  { eventStateMousePos = 0 }
+
+
+mouseEventButtonsToButtons :: Int -> [MouseButton]
+mouseEventButtonsToButtons = \case
+  0 -> []
+  1 -> [MouseButtonLeft]
+  2 -> [MouseButtonRight]
+  3 -> [MouseButtonLeft, MouseButtonRight]
+  4 -> [MouseButtonMiddle]
+  _ -> []
+
+
+newEvent
+  :: MonadIO m
+  => EventPayload
+  -> m Event
+newEvent p = do
+  Event
+    <$> liftIO (round . (1000 *) <$> getMonotonicTime)
+    <*> pure p
+
+
+mouseMoveHandler
+  :: MonadJSM m
+  => Canvas
+  -> Slot EventState
+  -> Slot [Event]
+  -> MVar ()
+  -> m Function
+mouseMoveHandler c sVar qVar mVar = liftJSM $ function $ \_ _ -> \case
+  [] -> return () -- absurd
+  event:_ -> do
+    cvsX <-
+      fromJSValUnchecked =<< canvasWindow c ^. js "offsetLeft"
+    cvsY <-
+      fromJSValUnchecked =<< canvasWindow c ^. js "offsetTop"
+    clientX <-
+      fromJSValUnchecked =<< event ^. js "clientX"
+    clientY <-
+      fromJSValUnchecked =<< event ^. js "clientY"
+    relX <-
+      fromJSValUnchecked =<< event ^. js "movementX"
+    relY <-
+      fromJSValUnchecked =<< event ^. js "movementY"
+    btnNum <-
+      fromJSValUnchecked =<< event ^. js "buttons"
+    s <-
+      withSlot sVar
+        $ \s ->
+            s{ eventStateMousePos = V2 (clientX - cvsX) (clientY - cvsY) }
+    liftIO $ print s
+
+    let
+      btns = mouseEventButtonsToButtons btnNum
+    ev <-
+      newEvent
+        $ EventMouseMotion
+        $ MouseMotionEvent
+            btns
+            (eventStateMousePos s)
+            (V2 relX relY)
+    void $ withSlot qVar (++ [ev])
+    -- trigger waitEvent
+    liftIO $ putMVar mVar ()
+
+
+getJSEventsAPI
+  :: MonadJSM m
+  => MutantInstance 'BackendJS
+  -> m (EventsAPI 'BackendJS m)
+getJSEventsAPI (JSInstance c) = do
+  -- Keep a mutable var for event state
+  sVar <- newSlot emptyEventState
+  -- Keep a mutable var for our event queue
+  qVar <- newSlot []
+  -- Keep an MVar for syncing waitEvent
+  mVar <- liftIO newEmptyMVar
+  document <- liftJSM $ jsg "document"
+  mousemove <- mouseMoveHandler c sVar qVar mVar
+  void $ liftJSM $ document ^. js3 "addEventListener" "mousemove" mousemove False
+  let
+    getMayEvent =
+      stateSlot qVar $ \case
+        [] -> (Nothing, [])
+        ev:evs -> (Just ev, evs)
+    resetWait = void $ liftIO $ tryTakeMVar mVar
+    pollEvents =
+      readSlot qVar
+      <* writeSlot qVar []
+    waitEvent t = do
+      -- check to see if there are already evs in the queue
+      mev <- getMayEvent >>= \case
+        Just ev -> do
+          return $ Just ev
+        -- if not, wait until there are, or there's a timeout
+        Nothing -> do
+          liftIO $ do
+            let evTrigger = takeMVar mVar
+                timeTrigger = threadDelay $ t * 1000
+            race_ evTrigger timeTrigger
+          getMayEvent
+      -- reset the mvar if needed
+      resetWait
+      return mev
+    beginTextInput = liftIO . putStrLn . ("beginTextInput: " ++) . show
+    endTextInput = liftIO $ putStrLn "endTextInput"
+  return
+    EventsAPI{.. }
+
+
+runJS
+  :: String
+  -> Int
+  -> JSM ()
+  -> IO ()
+runJS assetsPrefix port ma = do
+#ifndef ghcjs_HOST_OS
+  putStrLn $ concat ["running at http://localhost:", show port]
   app <-
-    jsaddleWithAppOr defaultConnectionOptions myApp
+    jsaddleWithAppOr defaultConnectionOptions ma
       $ staticApp
-      $ defaultWebAppSettings "assets/"
-  run 8888 app
-  where
-    myApp = do
-      i <- getJSInstance (V2 640 480)
-      r <- getJSRender2dAPI i
-      drawingStuff r
+      $ defaultWebAppSettings assetsPrefix
+  run port app
+#else
+  app
+#endif
+
+
+getJSAnimationFrameAPI
+  :: MutantInstance 'BackendJS
+  -> JSM (AnimationFrameAPI 'BackendJS JSM)
+getJSAnimationFrameAPI _ =
+  return AnimationFrameAPI
+    { requestAnimation = nextAnimationFrame . const }
