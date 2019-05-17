@@ -20,18 +20,18 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/the-mutant-sdl#readme>
 
 dependencies:
-- base >= 4.7 && < 5
-- directory
-- lens
-- linear
-- freetype2
-- JuicyPixels
-- mtl
-- sdl2
-- text
-- the-mutant
-- typograffiti-sdl
-- vector
+- base             >= 4.7 && < 5
+- directory        >= 1.3.3.0
+- lens             >= 4.17.1
+- linear           >= 1.20.8
+- freetype2        >= 0.1.2
+- JuicyPixels      >= 3.3.3
+- mtl              >= 2.2.2
+- sdl2             >= 2.4.1
+- text             >= 1.2.3.1
+- the-mutant       >= 0.1
+- typograffiti-sdl >= 0.1
+- vector           >= 0.12
 
 library:
   source-dirs: src

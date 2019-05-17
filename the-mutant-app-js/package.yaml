@@ -28,7 +28,7 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - base
-    - linear
-    - the-mutant-app
-    - the-mutant-js
+    - base           >= 4.7 && < 5
+    - linear         >= 1.20.8
+    - the-mutant-app >= 0.1
+    - the-mutant-js  >= 0.1
