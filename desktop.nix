@@ -8,7 +8,8 @@ let
   }) {};
 
 
-  cabal2nix = pkgs.haskellPackages.callCabal2nix;
+  cabal2nix =
+    pkgs.haskellPackages.callCabal2nix;
 
 
   typograffiti-src =
@@ -69,4 +70,16 @@ let
       { inherit the-mutant-app the-mutant-sdl; };
 
 
-in { inherit the-mutant the-mutant-sdl the-mutant-app the-mutant-app-sdl; }
+  targets =
+    { inherit the-mutant the-mutant-sdl the-mutant-app the-mutant-app-sdl; };
+
+
+  targetList =
+    map
+      (t: targets.${t})
+      (builtins.attrNames targets);
+
+in
+  if pkgs.lib.inNixShell
+  then pkgs.haskellPackages.shellFor { packages = _: targetList; }
+  else targets
