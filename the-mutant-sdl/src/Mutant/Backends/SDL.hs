@@ -36,6 +36,7 @@ import           SDL                    (Point (..), Rectangle (..), Window,
                                          ($=))
 import qualified SDL
 import qualified SDL.Raw.Types          as SDL (Rect (..))
+import qualified SDL.Raw.Video          as Video
 import           System.Directory       (doesFileExist)
 import           Typograffiti.SDL       as Typo
 
@@ -66,7 +67,10 @@ getSDLInstance
 getSDLInstance title size = do
   SDL.initialize $ Just SDL.InitVideo
   let wcfg = SDL.defaultWindow
-         { SDL.windowInitialSize = fromIntegral <$> size }
+         { SDL.windowInitialSize = fromIntegral <$> size
+         , SDL.windowOpenGL =
+             Just SDL.defaultOpenGL
+         }
   SDLInstance
     <$> SDL.createWindow (T.pack title) wcfg
 
@@ -109,8 +113,15 @@ getSDLRender2dAPI
   -> String
   -> m (Render2dAPI 'BackendSDL m)
 getSDLRender2dAPI (SDLInstance win) pfx = do
-  let rcfg = SDL.defaultRenderer
-               { SDL.rendererType = SDL.AcceleratedVSyncRenderer }
+  let rcfg = SDL.RendererConfig
+               { SDL.rendererType = SDL.AcceleratedVSyncRenderer
+               , SDL.rendererTargetTexture = True
+               }
+  liftIO $ do
+    print rcfg
+    putStrLn ""
+  SDL.getRenderDriverInfo
+    >>= liftIO . mapM (\i -> print i >> putStrLn "")
   r <- SDL.createRenderer win (-1) rcfg
   fstore <- runOrFail $ Typo.newDefaultFontStore r
   return
