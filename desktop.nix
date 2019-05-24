@@ -1,11 +1,7 @@
-# Defines the build set for publishing desktop games.
-#{ pkgs }:
-
 let
 
-  pkgs = import (builtins.fetchTarball {
-    url = "https://github.com/NixOS/nixpkgs/archive/42c0ce80e6bb1c27c233ba0ec1fd136bced7b0be.tar.gz";
-  }) {};
+  pkgs =
+    import ./nix/pkgs.nix {};
 
 
   cabal2nix =
