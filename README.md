@@ -87,7 +87,7 @@ drawingStuff Render2dAPI{..} = do
     $ Rect 0 wh
 
   -- draw a white frame inset by 10 pixels
-  null setDrawColor white
+  setDrawColor white
   strokeRect
     $ insetRect (Rect 0 wh) 10
 
