@@ -28,7 +28,7 @@ library:
   - -Werror
 
 tests:
-  free-gui-test:
+  the-mutant-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:

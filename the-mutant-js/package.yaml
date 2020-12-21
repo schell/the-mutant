@@ -19,28 +19,27 @@ extra-source-files:
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/githubuser/the-mutant-js#readme>
 
+flags:
+  dev:
+    description: Turn on if testing js on GHC (jsaddle-warp)
+    manual: true
+    default: false
+
 dependencies:
 - async          >= 2.2.1
 - base           >= 4.7 && < 5
 - lens           >= 4.17.1
 - linear         >= 1.20.8
 - jsaddle        >= 0.9.6.0
-- jsaddle-warp   >= 0.9.6.0
 - the-mutant     >= 0.1
-- wai-app-static >= 3.1.6.3
-- warp           >= 3.2.27
-- websockets     >= 0.12.5.3
+
+when:
+  condition: flag(dev)
+  dependencies:
+  - jsaddle-warp   >= 0.9.6.0
+  - wai-app-static >= 3.1.6.3
+  - warp           >= 3.2.27
+  - websockets     >= 0.12.5.3
 
 library:
   source-dirs: src
-
-tests:
-  the-mutant-js-test:
-    main:                Spec.hs
-    source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - the-mutant-js

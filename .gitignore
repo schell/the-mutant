@@ -18,3 +18,6 @@ cabal.config
 TAGS
 *.#*
 *.cabal
+cabal.project.local*
+result*
+.ghc*
